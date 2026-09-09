@@ -1,0 +1,36 @@
+{
+  "name": "ainotation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp run @ainotation/playground#dev",
+    "storybook": "vp run @ainotation/storybook#dev",
+    "build": "vp run -r build",
+    "test": "vp run -r test",
+    "typecheck": "vp run -r typecheck",
+    "check": "vp check",
+    "ready": "vp check && vp run typecheck && vp run test && vp run build",
+    "changeset": "changeset",
+    "version-packages": "changeset version"
+  },
+  "devDependencies": {
+    "@changesets/cli": "catalog:",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.3.4",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": "^24.20.0"
+  },
+  "packageManager": "pnpm@12.3.4"
+}

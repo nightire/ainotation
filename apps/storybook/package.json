@@ -1,0 +1,23 @@
+{
+  "name": "@ainotation/storybook",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "storybook dev --host 127.0.0.1 -p 6006 --no-open --ci",
+    "build": "storybook build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ainotation/sdk": "workspace:*",
+    "lit": "catalog:"
+  },
+  "devDependencies": {
+    "@storybook/web-components-vite": "catalog:",
+    "@types/node": "catalog:",
+    "storybook": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

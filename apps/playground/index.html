@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f6f8f7" />
+    <title>Ainotation Playground</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <header class="page-header">
+      <h1>Ainotation <span>/ Playground</span></h1>
+      <span id="mount-status" role="status">Unmounted</span>
+    </header>
+    <main>
+      <section class="toolbar" aria-label="Inspector controls">
+        <button id="mount" type="button">
+          <span data-icon="mount" aria-hidden="true"></span>Mount inspector
+        </button>
+        <button id="unmount" type="button" disabled>
+          <span data-icon="unmount" aria-hidden="true"></span>Unmount inspector
+        </button>
+      </section>
+      <section class="sample" aria-labelledby="sample-heading">
+        <h2 id="sample-heading">Sample</h2>
+        <label for="sample-text">Text</label>
+        <input id="sample-text" type="text" value="Ainotation" />
+        <h3>Preview</h3>
+        <output id="sample-output" for="sample-text">Ainotation</output>
+      </section>
+    </main>
+  </body>
+</html>

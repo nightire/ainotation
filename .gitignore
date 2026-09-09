@@ -1,0 +1,14 @@
+node_modules/
+output/
+.playwright-cli/
+*.log
+dist/
+storybook-static/
+.vite/
+.vite-plus/
+.cache/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.DS_Store

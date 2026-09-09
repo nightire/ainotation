@@ -1,0 +1,140 @@
+:root {
+  font:
+    15px/1.5 system-ui,
+    sans-serif;
+  color: #25332e;
+  background: #f6f8f7;
+  color-scheme: light;
+  letter-spacing: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #dce3df;
+  background: #fff;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+h1 span {
+  color: #66736d;
+  font-size: 15px;
+  font-weight: 400;
+}
+#mount-status {
+  color: #087268;
+  font-size: 13px;
+}
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 24px 180px;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 24px;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #b8c9c0;
+  border-radius: 4px;
+  background: #fff;
+  color: #215c50;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #e8f1ed;
+}
+button:disabled {
+  color: #6c7872;
+  opacity: 0.6;
+  cursor: default;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #087f75;
+  outline-offset: 3px;
+}
+[data-icon] {
+  display: flex;
+  flex: 0 0 18px;
+}
+svg {
+  width: 18px;
+  height: 18px;
+}
+.sample {
+  padding-top: 24px;
+  border-top: 1px solid #dce3df;
+}
+h2 {
+  margin: 0 0 20px;
+  font-size: 18px;
+}
+label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+input {
+  display: block;
+  width: 100%;
+  max-width: 400px;
+  min-height: 42px;
+  padding: 8px 12px;
+  border: 1px solid #aebfb6;
+  border-radius: 4px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+
+h3 {
+  margin: 28px 0 8px;
+  color: #637068;
+  font-size: 13px;
+  font-weight: 500;
+}
+output {
+  display: block;
+  min-height: 30px;
+  font-size: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .page-header {
+    padding: 16px;
+  }
+  main {
+    padding: 20px 16px 180px;
+  }
+}
