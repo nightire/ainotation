@@ -1,13 +1,13 @@
 import { createAinotation } from '@ainotation/sdk';
 import { createElement, PanelTop, X } from 'lucide';
 import './style.css';
+import { mountRoutes } from './routes';
 
 const mountButton = document.querySelector<HTMLButtonElement>('#mount')!;
 const unmountButton = document.querySelector<HTMLButtonElement>('#unmount')!;
 const status = document.querySelector<HTMLElement>('#mount-status')!;
-const input = document.querySelector<HTMLInputElement>('#sample-text')!;
-const output = document.querySelector<HTMLOutputElement>('#sample-output')!;
 const events = new AbortController();
+const disposeRoutes = mountRoutes();
 
 document.querySelector('[data-icon="mount"]')!.append(createElement(PanelTop));
 document.querySelector('[data-icon="unmount"]')!.append(createElement(X));
@@ -36,15 +36,9 @@ mountButton.addEventListener(
 );
 
 unmountButton.addEventListener('click', () => inspector.destroy(), { signal: events.signal });
-input.addEventListener(
-  'input',
-  () => {
-    output.value = input.value;
-  },
-  { signal: events.signal },
-);
 
 function dispose(): void {
+  disposeRoutes();
   events.abort();
   inspector.destroy();
 }

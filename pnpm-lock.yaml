@@ -122,6 +122,9 @@ catalogs:
     '@vitest/browser-playwright':
       specifier: 4.1.10
       version: 4.1.10
+    idb:
+      specifier: 8.0.3
+      version: 8.0.3
     lit:
       specifier: 3.3.3
       version: 3.3.3
@@ -185,9 +188,18 @@ importers:
         specifier: 'catalog:'
         version: 1.42.0
     devDependencies:
+      '@ainotation/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
+      '@modelcontextprotocol/sdk':
+        specifier: 'catalog:'
+        version: 1.30.0(zod@4.5.4)
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      playwright:
+        specifier: 'catalog:'
+        version: 1.63.0
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -263,6 +275,9 @@ importers:
       '@ainotation/schema':
         specifier: workspace:*
         version: link:../schema
+      idb:
+        specifier: 'catalog:'
+        version: 8.0.3
       lit:
         specifier: 'catalog:'
         version: 3.3.3
@@ -1774,6 +1789,9 @@ packages:
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
+
+  idb@8.0.3:
+    resolution: {integrity: sha512-LtwtVyVYO5BqRvcsKuB2iUMnHwPVByPCXFXOpuU96IZPPoPN6xjOGxZQ74pgSVVLQWtUOYgyeL4GE98BY5D3wg==}
 
   import-meta-resolve@4.2.0:
     resolution: {integrity: sha512-Iqv2fzaTQN28s/FwZAoFq0ZSs/7hMAHJVX+w8PZl3cY19Pxk6jFFalxQoIfW2826i/fDLXv8IiEZRIT0lDuWcg==}
@@ -3579,6 +3597,8 @@ snapshots:
   iconv-lite@0.7.3:
     dependencies:
       safer-buffer: 2.1.2
+
+  idb@8.0.3: {}
 
   import-meta-resolve@4.2.0: {}
 

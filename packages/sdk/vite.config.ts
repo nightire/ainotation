@@ -19,6 +19,7 @@ export default defineConfig({
     browser: {
       enabled: true,
       headless: true,
+      screenshotDirectory: '../../output/playwright/sdk-failures',
       provider: playwright({ launchOptions: { channel: 'chrome' } }),
       instances: [{ browser: 'chromium' }],
     },

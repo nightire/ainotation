@@ -44,11 +44,17 @@ describe('SDK lifecycle', () => {
     expect(container.children).toHaveLength(1);
     const shell = container.querySelector('ainotation-inspector-shell')!;
     await shell.updateComplete;
-    expect(shell.shadowRoot?.querySelector('h2')?.textContent).toBe('Ainotation');
-    expect(shell.shadowRoot?.querySelector('button svg')).not.toBeNull();
+    expect(shell.shadowRoot?.querySelector('[role="toolbar"]')?.getAttribute('aria-label')).toBe(
+      'Ainotation inspector',
+    );
+    expect(shell.expanded).toBe(false);
+    expect(shell.shadowRoot?.querySelector('.launcher')?.textContent?.trim()).toBe('A');
+    expect(shell.getBoundingClientRect().width).toBe(48);
+    expect(shell.getBoundingClientRect().height).toBe(48);
+    expect(shell.view.picking).toBe(false);
   });
 
-  it('closes through a native event, cleans up, and can remount', async () => {
+  it('opens into picking, minimizes without destroying, and supports explicit teardown', async () => {
     const { createAinotation } = await import('./index.js');
     const onDestroy = vi.fn();
     const instance = createAinotation({ onDestroy });
@@ -58,20 +64,24 @@ describe('SDK lifecycle', () => {
     await instance.mount();
     const shell = document.body.querySelector('ainotation-inspector-shell')!;
     await shell.updateComplete;
-    const onClose = vi.fn();
-    shell.addEventListener('ainotation-close', onClose, { once: true });
-    shell.shadowRoot!.querySelector('button')!.click();
-
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(onClose.mock.calls[0]?.[0]).toBeInstanceOf(CustomEvent);
-    expect(instance.mounted).toBe(false);
-    expect(shell.isConnected).toBe(false);
-    expect(onDestroy).toHaveBeenCalledOnce();
+    shell.shadowRoot!.querySelector<HTMLButtonElement>('.launcher')!.click();
+    await shell.updateComplete;
+    expect(shell.expanded).toBe(true);
+    expect(shell.view.picking).toBe(true);
+    shell.shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Close inspector"]')!.click();
+    await shell.updateComplete;
+    expect(shell.expanded).toBe(false);
+    expect(shell.view.picking).toBe(false);
+    expect(instance.mounted).toBe(true);
+    expect(shell.isConnected).toBe(true);
+    expect(onDestroy).not.toHaveBeenCalled();
+    shell.shadowRoot!.querySelector<HTMLButtonElement>('.launcher')!.click();
+    await shell.updateComplete;
+    expect(shell.view.picking).toBe(true);
     instance.destroy();
     expect(onDestroy).toHaveBeenCalledOnce();
 
     await instance.mount();
-    shell.dispatchEvent(new CustomEvent('ainotation-close'));
     expect(instance.mounted).toBe(true);
     instance.destroy();
     expect(onDestroy).toHaveBeenCalledTimes(2);

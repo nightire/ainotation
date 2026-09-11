@@ -1,5 +1,6 @@
 node_modules/
 output/
+.openchamber/screenshots/
 .playwright-cli/
 *.log
 dist/
@@ -9,6 +10,7 @@ storybook-static/
 .cache/
 coverage/
 test-results/
+.vitest-attachments/
 playwright-report/
 *.tsbuildinfo
 .DS_Store

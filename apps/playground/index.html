@@ -20,14 +20,150 @@
         <button id="unmount" type="button" disabled>
           <span data-icon="unmount" aria-hidden="true"></span>Unmount inspector
         </button>
+        <nav class="route-nav" aria-label="Playground pages">
+          <a href="/" data-playground-route>Samples</a>
+          <a href="/checkout" data-playground-route>Checkout</a>
+        </nav>
       </section>
-      <section class="sample" aria-labelledby="sample-heading">
-        <h2 id="sample-heading">Sample</h2>
-        <label for="sample-text">Text</label>
-        <input id="sample-text" type="text" value="Ainotation" />
-        <h3>Preview</h3>
-        <output id="sample-output" for="sample-text">Ainotation</output>
-      </section>
+      <div id="route-view">
+        <section class="sample" aria-labelledby="sample-heading">
+          <h2 id="sample-heading">Sample</h2>
+          <label for="sample-text">Text</label>
+          <input id="sample-text" type="text" value="Ainotation" />
+          <h3>Preview</h3>
+          <output id="sample-output" for="sample-text">Ainotation</output>
+        </section>
+        <section class="sample" aria-labelledby="menu-sample-heading">
+          <h2 id="menu-sample-heading">Popup menu</h2>
+          <p class="sample-description">Open the menu, then explore the export submenu.</p>
+          <div id="sample-menu-container">
+            <button
+              id="sample-menu-trigger"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded="false"
+              aria-controls="sample-menu"
+            >
+              Open menu <span data-icon="menu" aria-hidden="true"></span>
+            </button>
+            <div
+              id="sample-menu"
+              class="popup-menu"
+              role="menu"
+              aria-label="Document actions"
+              hidden
+            >
+              <button type="button" role="menuitem" tabindex="-1" data-menu-action="New document">
+                New document
+              </button>
+              <div class="submenu-group">
+                <button
+                  id="sample-submenu-trigger"
+                  type="button"
+                  role="menuitem"
+                  tabindex="-1"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-controls="sample-submenu"
+                >
+                  Export as <span data-icon="submenu" aria-hidden="true"></span>
+                </button>
+                <div
+                  id="sample-submenu"
+                  class="popup-menu"
+                  role="menu"
+                  aria-label="Export formats"
+                  hidden
+                >
+                  <button type="button" role="menuitem" tabindex="-1" data-menu-action="Export PDF">
+                    PDF
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabindex="-1"
+                    data-menu-action="Export Markdown"
+                  >
+                    Markdown
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabindex="-1"
+                    data-menu-action="Export plain text"
+                  >
+                    Plain text
+                  </button>
+                </div>
+              </div>
+              <div class="menu-separator" role="separator"></div>
+              <button
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                data-menu-action="Duplicate document"
+              >
+                Duplicate document
+              </button>
+            </div>
+          </div>
+          <output id="sample-menu-result" class="sample-result" aria-live="polite"
+            >No action selected yet.</output
+          >
+        </section>
+        <section class="sample" aria-labelledby="modal-sample-heading">
+          <h2 id="modal-sample-heading">Modal dialog</h2>
+          <p class="sample-description">Edit a project in a dialog with a translucent backdrop.</p>
+          <button id="sample-modal-trigger" type="button" aria-haspopup="dialog">Open modal</button>
+          <output id="sample-modal-result" class="sample-result" aria-live="polite"
+            >No changes saved yet.</output
+          >
+        </section>
+      </div>
     </main>
+    <div id="sample-modal-overlay" class="modal-overlay" hidden>
+      <div id="sample-modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
+      <section
+        id="sample-modal"
+        class="sample-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sample-modal-title"
+        aria-describedby="sample-modal-description"
+        tabindex="-1"
+      >
+        <div class="dialog-header">
+          <h2 id="sample-modal-title">Edit project</h2>
+          <button
+            id="sample-modal-close"
+            class="dialog-close"
+            type="button"
+            aria-label="Close modal"
+          >
+            <span data-icon="modal-close" aria-hidden="true"></span>
+          </button>
+        </div>
+        <p id="sample-modal-description" class="sample-description">
+          Update the project name and description.
+        </p>
+        <form id="sample-modal-form">
+          <label for="sample-project-name">Project name</label>
+          <input
+            id="sample-project-name"
+            name="projectName"
+            value="Ainotation"
+            required
+            maxlength="80"
+          />
+          <label for="sample-project-description">Description</label>
+          <textarea id="sample-project-description" name="description" rows="3" maxlength="500">
+Visual feedback for your project.</textarea>
+          <div class="dialog-actions">
+            <button id="sample-modal-cancel" type="button">Cancel</button>
+            <button class="primary" type="submit">Save changes</button>
+          </div>
+        </form>
+      </section>
+    </div>
   </body>
 </html>

@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@ainotation/schema": "workspace:*",
+    "idb": "catalog:",
     "lit": "catalog:",
     "lucide": "catalog:"
   },
