@@ -2,6 +2,7 @@ import type { InspectorShell } from './ui/index.js';
 import type { createRuntime } from './runtime';
 import type { FeedbackDocument } from '@ainotation/schema';
 import type { McpConnection } from './core/sync';
+import type { DevelopmentConnection } from './core/development';
 
 export type { FeedbackDocument, FeedbackExport } from '@ainotation/schema';
 
@@ -10,6 +11,7 @@ export interface AinotationOptions {
   onDestroy?: () => void;
   projectId?: string;
   mcp?: McpConnection;
+  development?: DevelopmentConnection;
 }
 
 export interface Ainotation {

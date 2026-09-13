@@ -120,6 +120,10 @@ export class FeedbackStore {
     return [...this.sessions.values()].map((session) => structuredClone(session.document));
   }
 
+  async flush(): Promise<void> {
+    await this.queue;
+  }
+
   get(sessionId: string, origin?: string): FeedbackDocument {
     z.uuid().parse(sessionId);
     const session = this.sessions.get(sessionId);

@@ -14,6 +14,36 @@
       "development": "./src/index.ts",
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./project": {
+      "development": "./src/project.ts",
+      "types": "./dist/project.d.mts",
+      "import": "./dist/project.mjs"
+    },
+    "./service": {
+      "development": "./src/shared-service.ts",
+      "types": "./dist/shared-service.d.mts",
+      "import": "./dist/shared-service.mjs"
+    },
+    "./discovery": {
+      "development": "./src/service-discovery.ts",
+      "types": "./dist/service-discovery.d.mts",
+      "import": "./dist/service-discovery.mjs"
+    },
+    "./bridge": {
+      "development": "./src/project-mcp.ts",
+      "types": "./dist/project-mcp.d.mts",
+      "import": "./dist/project-mcp.mjs"
+    },
+    "./browser": {
+      "development": "./src/browser-connection.ts",
+      "types": "./dist/browser-connection.d.mts",
+      "import": "./dist/browser-connection.mjs"
+    },
+    "./registration": {
+      "development": "./src/project-registration.ts",
+      "types": "./dist/project-registration.d.mts",
+      "import": "./dist/project-registration.mjs"
     }
   },
   "scripts": {

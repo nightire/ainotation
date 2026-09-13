@@ -53,6 +53,8 @@ export interface InspectorViewState {
   syncing: boolean;
   outputDetail: OutputDetail;
   theme: InspectorTheme;
+  managedConnection: boolean;
+  projectName: string;
 }
 
 export type InspectorAction =
@@ -85,5 +87,7 @@ export function emptyViewState(): InspectorViewState {
     syncing: false,
     outputDetail: 'standard',
     theme: 'light',
+    managedConnection: false,
+    projectName: '',
   };
 }

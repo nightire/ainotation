@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vp run @ainotation/playground#dev",
+    "dev:react": "vp run @ainotation/react#dev",
+    "dev:vue": "vp run @ainotation/vue#dev",
+    "dev:apps": "vp run --parallel --filter @ainotation/playground --filter @ainotation/react --filter @ainotation/vue dev",
     "storybook": "vp run @ainotation/storybook#dev",
     "build": "vp run -r build",
     "test": "vp run -r test",

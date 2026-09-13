@@ -5,11 +5,22 @@ import type { SyncResponse } from '@ainotation/schema';
 export interface McpConnection {
   endpoint: string;
   token: string;
+  transport?: 'same-origin';
 }
 
 export function normalizeConnection(connection: McpConnection): McpConnection {
   const url = new URL(connection.endpoint);
-  if (
+  if (connection.transport === 'same-origin') {
+    if (
+      url.origin !== location.origin ||
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      throw new Error('Development MCP endpoint must be same-origin.');
+  } else if (
     !['http:', 'https:'].includes(url.protocol) ||
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
     url.username ||
@@ -26,20 +37,30 @@ export function normalizeConnection(connection: McpConnection): McpConnection {
     connection.token.length > 512
   )
     throw new Error('Enter a valid pairing token.');
-  return { endpoint: url.origin, token: connection.token.trim() };
+  return {
+    endpoint: connection.transport === 'same-origin' ? url.href.replace(/\/$/, '') : url.origin,
+    token: connection.token.trim(),
+    ...(connection.transport ? { transport: connection.transport } : {}),
+  };
 }
 
 export function createSyncClient(options: {
-  connection: McpConnection;
+  connection: McpConnection | ((signal: AbortSignal) => Promise<McpConnection>);
   sessionId: string;
   read: () => Promise<DraftRecord>;
   apply: (response: SyncResponse) => Promise<void>;
   onState: (state: 'connecting' | 'connected' | 'error', message: string) => void;
   onSync: (syncing: boolean) => void;
 }) {
-  const connection = normalizeConnection(options.connection);
   const controller = new AbortController();
-  const headers = { Authorization: `Bearer ${connection.token}` };
+  const configured = options.connection;
+  const resolveConnection =
+    typeof configured === 'function'
+      ? async () => normalizeConnection(await configured(controller.signal))
+      : (() => {
+          const connection = normalizeConnection(configured);
+          return async () => connection;
+        })();
   let stopped = false;
   let wanted = false;
   let running: Promise<void> | undefined;
@@ -54,21 +75,29 @@ export function createSyncClient(options: {
           wanted = false;
           const record = await options.read();
           if (stopped) return;
+          const connection = await resolveConnection();
+          if (stopped) return;
           const response = await fetch(
             `${connection.endpoint}/sessions/${options.sessionId}/sync`,
             {
               method: 'POST',
-              headers: { ...headers, 'Content-Type': 'application/json' },
+              headers: {
+                Authorization: `Bearer ${connection.token}`,
+                'Content-Type': 'application/json',
+              },
               credentials: 'omit',
+              redirect: 'error',
               cache: 'no-store',
               body: JSON.stringify({ document: record.document, operations: record.operations }),
               signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
             },
           );
-          if (!response.ok)
+          if (!response.ok) {
+            await response.body?.cancel();
             throw new Error(
               `MCP sync failed (${response.status}). Check pairing token, allowed origin and request size.`,
             );
+          }
           const data = SyncResponseSchema.parse(await response.json());
           if (data.document.id !== options.sessionId || data.document.url !== record.document.url)
             throw new Error('MCP returned another session.');
@@ -111,18 +140,24 @@ export function createSyncClient(options: {
       try {
         await sync();
         if (stopped) break;
+        const connection = await resolveConnection();
+        if (stopped) break;
         streaming = new AbortController();
         armWatchdog(10000);
         const response = await fetch(
           `${connection.endpoint}/sessions/${options.sessionId}/events`,
           {
-            headers,
+            headers: { Authorization: `Bearer ${connection.token}` },
             credentials: 'omit',
+            redirect: 'error',
             cache: 'no-store',
             signal: AbortSignal.any([controller.signal, streaming.signal]),
           },
         );
-        if (!response.ok || !response.body) throw new Error('MCP event stream unavailable');
+        if (!response.ok || !response.body) {
+          await response.body?.cancel();
+          throw new Error('MCP event stream unavailable');
+        }
         reader = response.body.getReader();
         armWatchdog(35000);
         options.onState('connected', 'MCP server connected');
@@ -147,6 +182,7 @@ export function createSyncClient(options: {
       } finally {
         clearTimeout(watchdog);
         await reader?.cancel().catch(() => {});
+        reader?.releaseLock();
       }
       if (!stopped) await delay();
     }

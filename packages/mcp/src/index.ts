@@ -2,10 +2,20 @@ import {
   AnnotationContentSchema,
   feedbackExport,
   feedbackExportJsonSchema,
+  type FeedbackExport,
 } from '@ainotation/schema';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { AnnotationPatchSchema, CreateAnnotationSchema, FeedbackStore, StoreError } from './store';
+import {
+  AnnotationPatchSchema,
+  CreateAnnotationSchema,
+  FeedbackStore,
+  StoreError,
+  type AnnotationPatch,
+  type CreateAnnotationInput,
+} from './store';
+import { ProjectSelectorSchema } from './project-choice';
+import { toolResponse as respond } from './mcp-result';
 
 export {
   createFeedbackStore,
@@ -16,8 +26,72 @@ export {
   type AnnotationPatch,
 } from './store';
 export { startHttpServer } from './http';
+export {
+  startSharedService,
+  readServiceConnection,
+  defaultServiceDirectory,
+  type ServiceConnection,
+} from './shared-service';
+export { type IssuedGrant, type ProjectGrant, type RegisteredProject } from './project-service';
+export {
+  initializeProject,
+  discoverProject,
+  declareProject,
+  projectIdFor,
+  ProjectDeclarationSchema,
+  findProjectRoot,
+  ProjectConfigSchema,
+  PROJECT_CONFIG_FILE,
+  ProjectError,
+  type ProjectConfig,
+  type ProjectInfo,
+  type ProjectToolchain,
+  type ProjectDeclaration,
+} from './project';
 
-export function createMcpServer(store: FeedbackStore = new FeedbackStore()): McpServer {
+export interface McpFeedbackBackend {
+  list(): Promise<FeedbackExport[]>;
+  get(sessionId: string): Promise<FeedbackExport>;
+  createAnnotation(sessionId: string, input: CreateAnnotationInput): Promise<FeedbackExport>;
+  updateAnnotation(
+    sessionId: string,
+    annotationId: string,
+    patch: AnnotationPatch,
+  ): Promise<FeedbackExport>;
+  deleteAnnotation(sessionId: string, annotationId: string): Promise<FeedbackExport>;
+}
+export type McpBackendResolver = (project?: string) => Promise<McpFeedbackBackend>;
+
+export function createMcpServer(
+  store: FeedbackStore | McpFeedbackBackend | McpBackendResolver = new FeedbackStore(),
+): McpServer {
+  const backend: McpFeedbackBackend | McpBackendResolver =
+    store instanceof FeedbackStore
+      ? {
+          async list() {
+            return store.list().map(feedbackExport);
+          },
+          async get(sessionId) {
+            return feedbackExport(store.get(sessionId));
+          },
+          async createAnnotation(sessionId, input) {
+            return feedbackExport(await store.createAnnotation(sessionId, input));
+          },
+          async updateAnnotation(sessionId, annotationId, patch) {
+            return feedbackExport(await store.updateAnnotation(sessionId, annotationId, patch));
+          },
+          async deleteAnnotation(sessionId, annotationId) {
+            return feedbackExport(await store.deleteAnnotation(sessionId, annotationId));
+          },
+        }
+      : store;
+  const backendFor: McpBackendResolver =
+    typeof backend === 'function' ? backend : async () => backend;
+  const scope = typeof store === 'function' ? { project: ProjectSelectorSchema.optional() } : {};
+  const forInput = (input: object) =>
+    backendFor(
+      'project' in input ? ProjectSelectorSchema.optional().parse(input.project) : undefined,
+    );
   const server = new McpServer({ name: 'ainotation', version: '0.0.0' });
   server.registerTool(
     'ainotation_get_schema',
@@ -30,39 +104,24 @@ export function createMcpServer(store: FeedbackStore = new FeedbackStore()): Mcp
       content: [{ type: 'text' as const, text: JSON.stringify(feedbackExportJsonSchema()) }],
     }),
   );
-  const result = (value: unknown) => ({
-    content: [{ type: 'text' as const, text: JSON.stringify(value) }],
-  });
   const readAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
-  const respond = async (run: () => unknown) => {
-    try {
-      return result(await run());
-    } catch (error) {
-      return {
-        ...result({
-          error: error instanceof StoreError ? error.message : 'Feedback operation failed',
-        }),
-        isError: true,
-      };
-    }
-  };
   server.registerTool(
     'ainotation_list_sessions',
     {
       description: 'List feedback sessions with annotation content and page/target context.',
-      inputSchema: {},
+      inputSchema: z.object(scope).strict(),
       annotations: readAnnotations,
     },
-    () => respond(() => store.list().map(feedbackExport)),
+    (input) => respond(async () => (await forInput(input)).list()),
   );
   server.registerTool(
     'ainotation_get_feedback',
     {
       description: 'Get the feedback document with annotation content and page/target context.',
-      inputSchema: { sessionId: z.uuid() },
+      inputSchema: z.object({ ...scope, sessionId: z.uuid() }).strict(),
       annotations: readAnnotations,
     },
-    ({ sessionId }) => respond(() => feedbackExport(store.get(sessionId))),
+    (input) => respond(async () => (await forInput(input)).get(input.sessionId)),
   );
   const pair = { sessionId: z.uuid(), annotationId: z.uuid() };
   const mutationAnnotations = {
@@ -77,27 +136,33 @@ export function createMcpServer(store: FeedbackStore = new FeedbackStore()): Mcp
       description:
         'Create an annotation using a client-provided UUID; identical retries return the existing content. Return the feedback document.',
       inputSchema: z
-        .object({ ...pair, ...CreateAnnotationSchema.omit({ id: true }).shape })
+        .object({ ...scope, ...pair, ...CreateAnnotationSchema.omit({ id: true }).shape })
         .strict(),
       annotations: mutationAnnotations,
     },
-    ({ sessionId, annotationId, ...content }) =>
+    (input) =>
       respond(async () =>
-        feedbackExport(await store.createAnnotation(sessionId, { id: annotationId, ...content })),
+        (await forInput(input)).createAnnotation(input.sessionId, {
+          id: input.annotationId,
+          comment: input.comment,
+          page: input.page,
+          targets: input.targets,
+        }),
       ),
   );
   server.registerTool(
     'ainotation_get_annotation',
     {
       description: 'Get one annotation with its complete page and target context.',
-      inputSchema: z.object(pair).strict(),
+      inputSchema: z.object({ ...scope, ...pair }).strict(),
       annotations: readAnnotations,
     },
-    ({ sessionId, annotationId }) =>
-      respond(() => {
-        const annotation = store
-          .get(sessionId)
-          .annotations.find((item) => item.id === annotationId);
+    (input) =>
+      respond(async () => {
+        const backend = await forInput(input);
+        const annotation = (await backend.get(input.sessionId)).annotations.find(
+          (item) => item.id === input.annotationId,
+        );
         if (!annotation) throw new StoreError(404, 'Annotation not found in session');
         return AnnotationContentSchema.parse(annotation);
       }),
@@ -107,12 +172,12 @@ export function createMcpServer(store: FeedbackStore = new FeedbackStore()): Mcp
     {
       description:
         'Update annotation comment, page or targets; provide at least one field. Return the feedback document.',
-      inputSchema: z.object({ ...pair, patch: AnnotationPatchSchema }).strict(),
+      inputSchema: z.object({ ...scope, ...pair, patch: AnnotationPatchSchema }).strict(),
       annotations: mutationAnnotations,
     },
-    ({ sessionId, annotationId, patch }) =>
+    (input) =>
       respond(async () =>
-        feedbackExport(await store.updateAnnotation(sessionId, annotationId, patch)),
+        (await forInput(input)).updateAnnotation(input.sessionId, input.annotationId, input.patch),
       ),
   );
   server.registerTool(
@@ -120,11 +185,13 @@ export function createMcpServer(store: FeedbackStore = new FeedbackStore()): Mcp
     {
       description:
         'Delete an annotation; retries of a previously deleted ID succeed. Return the feedback document.',
-      inputSchema: z.object(pair).strict(),
+      inputSchema: z.object({ ...scope, ...pair }).strict(),
       annotations: { ...mutationAnnotations, destructiveHint: true },
     },
-    ({ sessionId, annotationId }) =>
-      respond(async () => feedbackExport(await store.deleteAnnotation(sessionId, annotationId))),
+    (input) =>
+      respond(async () =>
+        (await forInput(input)).deleteAnnotation(input.sessionId, input.annotationId),
+      ),
   );
   return server;
 }

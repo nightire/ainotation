@@ -58,7 +58,7 @@ inspector.destroy();
 
 导入入口不会访问 DOM；UI 和运行时在异步 mount 时按需加载。SDK 提供 Lit 和所用图标的运行时代码，不要求宿主手动提供框架。尚未增加独立 Script 分发入口。
 
-在 Playground 点击 **Mount inspector** 后：
+运行 `vp run dev` 后，Playground 默认通过 Vite 插件自动挂载 Ainotation，无需点击挂载按钮：
 
 顶部 **Samples**（`/`）与 **Checkout**（`/checkout`）可来回切换，切换时 Inspector 保持挂载。展开 Inspector 后按住 Option/Alt 点击导航，可在两个路由分别新增标注；返回时恢复该路由的 marker 和草稿，点击 Copy feedback 会合并复制两页已保存的标注。浏览器前进、后退及直接刷新 `/checkout` 同样支持。
 
@@ -80,7 +80,7 @@ Inspector 展开时，按住 **Option（macOS）/ Alt（Windows/Linux）** 可�
 
 需要标注 focus 或展开状态时，先按住 Option/Alt 激活控件，再松开并点击要标注的元素。目标快照保留选取瞬间的焦点状态、`aria-expanded` 和相关样式，不被之后 popover 获取焦点的变化覆盖；输入框的实际 value 不会自动采集。
 
-关闭 toolbar 会回到圆形、停止拾取并隐藏页面高亮、marker 与 popover，不清除标注或草稿，也不断开 MCP。重新打开时按可解析元素的位置恢复；缺失目标的标注保留，并以捕获时的位置作为 marker 后备位置，便于继续编辑或删除，不将快照改绑到其它元素。旧标注没有 marker 字段时，默认使用最后一个目标的右下角。完全卸载请调用 `destroy()` 或使用 Playground 的 **Unmount inspector**。圆形可直接拖动，toolbar 可通过空白边缘或分隔符拖动。两种形态共享位置：拖动任一种都会带动另一种的锚点。移动圆形后优先向左展开，左侧空间不足时向右展开；移动 toolbar 后沿当前锚点收起和展开，避免切换形态时跳位。两种形态都保持在视口内。聚焦圆形或 toolbar 的移动区域后也可用方向键移动，Shift 配合方向键微调。
+关闭 toolbar 会回到圆形、停止拾取并隐藏页面高亮、marker 与 popover，不清除标注或草稿，也不断开 MCP。重新打开时按可解析元素的位置恢复；缺失目标的标注保留，并以捕获时的位置作为 marker 后备位置，便于继续编辑或删除，不将快照改绑到其它元素。旧标注没有 marker 字段时，默认使用最后一个目标的右下角。手动使用 SDK 时，完全卸载请调用 `destroy()`。圆形可直接拖动，toolbar 可通过空白边缘或分隔符拖动。两种形态共享位置：拖动任一种都会带动另一种的锚点。移动圆形后优先向左展开，左侧空间不足时向右展开；移动 toolbar 后沿当前锚点收起和展开，避免切换形态时跳位。两种形态都保持在视口内。聚焦圆形或 toolbar 的移动区域后也可用方向键移动，Shift 配合方向键微调。
 
 `Option + Shift + A`（macOS）或 `Alt + Shift + A`（Windows/Linux）切换 toolbar 展开与收起，同时开启或退出元素选取。快捷键在反馈输入框中也可用；忽略长按重复和输入法组合输入，卸载 SDK 后移除监听。
 
@@ -110,6 +110,44 @@ Storybook 的 **Inspector/Shell** 展示触发器、toolbar、Settings popover �
 开发环境通过条件导出访问 workspace 源码；生产构建使用 `dist` 中的 ESM 和类型声明。需要直接使用产物时，先执行 `vp run build`。
 
 ## MCP 集成
+
+### 多框架测试应用
+
+仓库提供三个独立的 Web 项目，均通过 Vite 插件自动接入。首次使用先运行 `vp run build`。
+
+| 应用       | 启动命令           | 默认地址                | MCP project 名称        |
+| ---------- | ------------------ | ----------------------- | ----------------------- |
+| Playground | `vp run dev`       | `http://127.0.0.1:5173` | `Ainotation Playground` |
+| React      | `vp run dev:react` | `http://127.0.0.1:5174` | `react`                 |
+| Vue        | `vp run dev:vue`   | `http://127.0.0.1:5175` | `vue`                   |
+
+也可用 `vp run dev:apps` 同时启动三个应用。React / Vue 示例包含响应式计数器、输入框、下拉选择、展开内容和禁用按钮；按住 Option/Alt 操作真实页面，松开后标注。测试整个 monorepo 时，MCP 配置应省略 app 级 `--directory` 或指向仓库根目录，再通过 `ainotation_list_projects` 和每次调用的 `project` 参数选择应用。
+
+### 推荐：Vite / Vite+ 自动接入
+
+在 Vite 配置中声明项目即可，不需要执行 init，也不需要 `ainotation.config.json`：
+
+```ts
+import { ainotation } from '@ainotation/vite';
+
+export default {
+  plugins: [ainotation({ name: 'my-company/web-app' })],
+};
+```
+
+默认使用 `name` 作为稳定项目键，内部 ID 确定性生成；如果需要自由修改显示名称，提供独立的 `id`，例如 `ainotation({ name: '管理后台', id: 'my-company/admin' })`。`id` 可以是普通字符串，也兼容旧 UUID。不同目录重复使用同一个项目键会拒绝注册，不会合并标注。
+
+Agent 的 stdio MCP 启动命令使用 `node /absolute/path/to/packages/mcp/dist/cli.mjs connect`。全局配置优先从 Agent roots 识别工作区；不提供 roots 时使用启动目录。可以附加 `--directory /absolute/path/to/web-app-or-workspace`：指向已注册 Web app 时固定限定为该 app，指向 monorepo 时可访问其中的项目。MCP 通过本机注册表发现项目，不执行 Vite 配置；首次启动顺序不限，若 MCP 先访问未注册项目，启动开发服务器后重试即可。
+
+Monorepo 中多个 Web app 可以共用一个 MCP 配置。先调用 `ainotation_list_projects` 获取当前工作区的候选项目，再在标注工具中传入 `project`，例如 `ainotation_list_sessions({ project: "admin" })`。参数支持精确的显示名称、插件稳定 id 或返回的项目 UUID；同名或名称与稳定 id 冲突时使用 UUID。只有一个候选项目时可省略参数，多项目省略参数会返回候选列表并要求明确选择。不会根据上一次调用或 session ID 猜测项目。
+
+每次调用独立解析项目并使用该项目的授权，因此并行会话不会互相切换目标；工作区外的项目不会进入候选列表，知道其名称或 ID 也不能访问。Agent roots 变化后会撤销该 MCP 连接持有的项目授权，需要重新连接。
+
+插件在开发服务器启动时自动注册项目，自动挂载 SDK，并通过同源代理同步。Settings 无需填写 endpoint/token。共享服务会自动启动或复用；MCP 连接退出只撤销自身授权。生产构建不注入工具。自动接入额外提供 `ainotation_list_projects` 和 `ainotation_get_project` 发现项目、确认身份。
+
+当前仓库可执行 `vp run build` 后运行 `vp run dev`。Playground 的名称与稳定 ID 位于 `apps/playground/vite.config.ts`，其中保留旧 ID 以兼容已有反馈。手动挂载/卸载的生命周期测试使用 `tests/manual-entry.ts` 夹具，不再提供单独的开发模式。旧版共享服务需要升级时，可先运行 `node packages/mcp/dist/cli.mjs service --stop`，再启动开发服务器；Agent 也需重新加载新的 MCP 进程。
+
+### 手动兼容入口
 
 ```sh
 vp run build
@@ -142,4 +180,4 @@ MCP 工具包括 `ainotation_list_sessions`、`ainotation_get_feedback`、`ainot
 
 已配置 Changesets。实现需要记录版本影响的变更时运行 `vp run changeset`；发布准备阶段使用 `vp run version-packages`。当前未自动提交、打 tag 或发布包。
 
-`AGENTS.md` 记录已确定的技术栈与边界。测试截图和其它本机产物位于 git 忽略目录，不参与发布。当前自动化覆盖 Chrome；Firefox/Safari 的这轮正式流程仍需后续回归。闭合 Shadow DOM、iframe 内部、源码定位、动画和图片附件尚未纳入此里程碑。
+`AGENTS.md` 记录已确定的技术栈与边界。测试截图和其它本机产物位于 git 忽略目录，不参与发布。当前自动化覆盖 Chrome；里程碑一已通过 Firefox/Safari 手动验收。新增自动接入流程的浏览器回归目前使用 Chrome。闭合 Shadow DOM、iframe 内部、源码定位、动画和图片附件尚未纳入此里程碑。

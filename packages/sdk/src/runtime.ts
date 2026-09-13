@@ -15,10 +15,11 @@ import { emptyViewState, type InspectorAction } from './core/types';
 import { createMarkerLayer } from './ui/markers';
 import { bindPreferences } from './runtime-preferences';
 import { copyProjectFeedback, createFeedbackDownloads } from './core/handoff';
+import { developmentBridge, type DevelopmentConnection } from './core/development';
 
 export async function createRuntime(
   shell: InspectorShell,
-  options: { projectId?: string; mcp?: McpConnection },
+  options: { projectId?: string; mcp?: McpConnection; development?: DevelopmentConnection },
   signal: AbortSignal,
 ) {
   const view = emptyViewState();
@@ -26,6 +27,13 @@ export async function createRuntime(
   let record: DraftRecord | null = null;
   let pageUrl = location.href;
   const project = options.projectId || location.origin;
+  if (options.development && options.mcp)
+    throw new Error('Choose either a development bridge or a manual MCP connection.');
+  const development = options.development
+    ? developmentBridge(options.development, project, signal)
+    : undefined;
+  view.managedConnection = !!development;
+  view.projectName = options.development?.projectName ?? '';
   const keyFor = (url: string) => JSON.stringify([project, url]);
   let pageKey = keyFor(pageUrl);
   let pageGeneration = 0;
@@ -225,18 +233,24 @@ export async function createRuntime(
     sync?.stop();
     sync = undefined;
     const token = ++syncGeneration;
-    if (!record || !connection || disposed) return;
+    if (!record || (!connection && !development) || disposed) return;
     const key = pageKey;
     const url = pageUrl;
     const currentConnection = connection;
     view.connection = 'connecting';
     render();
-    const bound = await store.bindAuthority(key, url, currentConnection.endpoint);
+    const bound = await store.bindAuthority(
+      key,
+      url,
+      development?.authority ?? currentConnection!.endpoint,
+    );
     if (token !== syncGeneration || disposed) return;
     accept(bound);
     if (token !== syncGeneration || disposed) return;
     sync = createSyncClient({
-      connection: currentConnection,
+      connection: development
+        ? (syncSignal) => development.resolve(syncSignal)
+        : currentConnection!,
       sessionId: bound.document.id,
       read: () => store.read(key, url),
       async apply(response) {
@@ -340,10 +354,12 @@ export async function createRuntime(
       return;
     }
     if (action.type === 'connect') {
+      if (development) return;
       await connect(action);
       return;
     }
     if (action.type === 'disconnect') {
+      if (development) return;
       disconnect();
       return;
     }
@@ -514,7 +530,9 @@ export async function createRuntime(
     return true;
   }
   try {
-    if (options.mcp) connection = normalizeConnection(options.mcp);
+    if (development) {
+      /* The development server owns ephemeral credentials. */
+    } else if (options.mcp) connection = normalizeConnection(options.mcp);
     else {
       const saved = sessionStorage.getItem(credentialsKey);
       if (saved) connection = normalizeConnection(JSON.parse(saved) as McpConnection);

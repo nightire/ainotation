@@ -7,8 +7,22 @@ export function createPlaygroundServer(specifier: string) {
   const name = basename(fileURLToPath(specifier), '.test.ts');
   return createServer({
     root: resolve(import.meta.dirname, '..'),
-    cacheDir: resolve(import.meta.dirname, '../../../node_modules/.cache/playground-tests', name),
-    configFile: resolve(import.meta.dirname, '../vite.config.ts'),
+    cacheDir: resolve(
+      import.meta.dirname,
+      '../../../node_modules/.cache/playground-tests/manual',
+      name,
+    ),
+    optimizeDeps: { entries: ['tests/manual-entry.ts'] },
+    configFile: false,
+    plugins: [
+      {
+        name: 'playground-lifecycle-fixture',
+        transformIndexHtml: {
+          order: 'pre',
+          handler: (html) => html.replace('src="/src/main.ts"', 'src="/tests/manual-entry.ts"'),
+        },
+      },
+    ],
     server: { host: '127.0.0.1', port: 0 },
     logLevel: 'silent',
   });

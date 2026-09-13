@@ -1,37 +1,9 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type ServerResponse } from 'node:http';
 import { SyncRequestSchema } from '@ainotation/schema';
 import { z } from 'zod';
 import { FeedbackStore, StoreError } from './store';
-
-const MAX_BODY_BYTES = 1024 * 1024;
-
-async function readJson(request: IncomingMessage): Promise<unknown> {
-  if (
-    !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers['content-type'] ?? '') ||
-    request.headers['content-encoding']
-  ) {
-    throw new StoreError(415, 'Expected unencoded application/json');
-  }
-  if (Number(request.headers['content-length']) > MAX_BODY_BYTES)
-    throw new StoreError(413, 'Request too large');
-  const chunks: Buffer[] = [];
-  let length = 0;
-  for await (const chunk of request.iterator({ destroyOnReturn: false })) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    length += buffer.length;
-    if (length > MAX_BODY_BYTES) {
-      request.resume();
-      throw new StoreError(413, 'Request too large');
-    }
-    chunks.push(buffer);
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  } catch {
-    throw new StoreError(400, 'Invalid JSON');
-  }
-}
+import { readJson, isExactOrigin, sendError } from './http-common';
 
 export async function startHttpServer(options: {
   store: FeedbackStore;
@@ -43,17 +15,7 @@ export async function startHttpServer(options: {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
   if (!token || /\s/.test(token))
     throw new Error('Token must be nonempty and contain no whitespace');
-  if (
-    origins.length === 0 ||
-    origins.some((origin) => {
-      try {
-        const url = new URL(origin);
-        return !['http:', 'https:'].includes(url.protocol) || url.origin !== origin;
-      } catch {
-        return true;
-      }
-    })
-  )
+  if (origins.length === 0 || origins.some((origin) => !isExactOrigin(origin)))
     throw new Error('Origins must be exact HTTP(S) origins');
   const allowedOrigins = new Set(origins);
   const tokenHash = createHash('sha256').update(`Bearer ${token}`).digest();
@@ -135,23 +97,7 @@ export async function startHttpServer(options: {
         });
         changed();
       } else throw new StoreError(405, 'Method not allowed');
-    })().catch((error: unknown) => {
-      if (response.headersSent) {
-        response.destroy();
-        return;
-      }
-      const status =
-        error instanceof StoreError ? error.status : error instanceof z.ZodError ? 400 : 500;
-      // Never reflect request data, credentials, or filesystem error details.
-      json(status, {
-        error:
-          error instanceof StoreError
-            ? error.message
-            : status === 400
-              ? 'Invalid request'
-              : 'Internal server error',
-      });
-    });
+    })().catch((error: unknown) => sendError(response, error));
   });
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;

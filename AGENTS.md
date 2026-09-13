@@ -32,6 +32,7 @@
 - 工具运行时依赖由 SDK 自行提供，不要求宿主安装 Lit；重模块按需加载。
 - 原生资源生命周期独立于 UI 渲染；销毁时清理监听器、动画控制和媒体流。
 - MCP 服务默认仅监听 loopback，并实现本地鉴权、Origin 校验和会话隔离。
+- 标准接入通过 Vite 插件 `ainotation({ name, id? })` 声明项目，不要求独立身份文件或 init。插件启动时注册本机项目；MCP 按 roots/目录限定工作区，通过 `ainotation_list_projects` 发现 app，每次调用用可选 `project` 参数按名称、稳定键或 UUID 选择。单项目自动选择，多项目或同名歧义返回候选；不使用全局“当前项目”，不越过工作区范围。显式目录匹配 app 时固定限定该 app。name 默认兼作稳定键，显式 id 允许重命名；旧 UUID 与旧配置入口保留兼容。
 
 ## 当前仓库
 
@@ -40,6 +41,7 @@ packages/
   schema/              共享数据契约
   sdk/                 核心逻辑与 Lit UI
   mcp/                 独立 MCP 服务
+  vite/                开发环境注入与项目自动配对插件
 apps/
   playground/          SDK 集成开发与验证
   storybook/           UI 组件开发

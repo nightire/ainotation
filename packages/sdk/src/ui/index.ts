@@ -843,62 +843,74 @@ export class InspectorShell extends LitElement {
           to copied Markdown.
         </p>
         <p>MCP connection</p>
-        <p class="muted">
-          ${view.connection === 'connected' ? 'Feedback sync is connected to the local MCP server.' : 'Local feedback is available. Connect a local MCP server to share it with your agent.'}
-        </p>
-        <form
-          class="connection-form"
-          @submit=${(event: SubmitEvent) => {
-            event.preventDefault();
-            if (
-              !endpoint.trim() ||
-              !this.token.trim() ||
-              view.connection === 'connecting' ||
-              view.connection === 'connected'
-            )
-              return;
-            const token = this.token.trim();
-            this.token = '';
-            this.onaction({ type: 'connect', endpoint: endpoint.trim(), token });
-          }}
-        >
-          <label
-            >Endpoint<input
-              type="url"
-              required
-              .value=${endpoint}
-              placeholder="http://127.0.0.1:4748"
-              @input=${(event: Event) => {
-                this.endpointDraft = (event.currentTarget as HTMLInputElement).value;
-              }}
-          /></label>
-          <label
-            >Token<input
-              type="password"
-              autocomplete="off"
-              .value=${this.token}
-              @input=${(event: Event) => {
-                this.token = (event.currentTarget as HTMLInputElement).value;
-              }}
-          /></label>
-          <div class="row">
-            <button
-              type="submit"
-              ?disabled=${view.storage === 'loading' || !endpoint.trim() || !this.token.trim() || view.connection === 'connecting' || view.connection === 'connected'}
-            >
-              Connect
-            </button>
-            ${
-              view.connection !== 'offline'
-                ? html`
-                    <button type="button" @click=${() => this.onaction({ type: 'disconnect' })}>
-                      Disconnect
+        ${
+          view.managedConnection
+            ? html`<p class="muted">${view.projectName}</p>
+                <p class="muted">
+                  ${view.connection === 'connected' ? 'Connected through the development server.' : 'Automatic connection through the development server.'}
+                </p>`
+            : html`
+                <p class="muted">
+                  ${view.connection === 'connected' ? 'Feedback sync is connected to the local MCP server.' : 'Local feedback is available. Connect a local MCP server to share it with your agent.'}
+                </p>
+                <form
+                  class="connection-form"
+                  @submit=${(event: SubmitEvent) => {
+                    event.preventDefault();
+                    if (
+                      !endpoint.trim() ||
+                      !this.token.trim() ||
+                      view.connection === 'connecting' ||
+                      view.connection === 'connected'
+                    )
+                      return;
+                    const token = this.token.trim();
+                    this.token = '';
+                    this.onaction({ type: 'connect', endpoint: endpoint.trim(), token });
+                  }}
+                >
+                  <label
+                    >Endpoint<input
+                      type="url"
+                      required
+                      .value=${endpoint}
+                      placeholder="http://127.0.0.1:4748"
+                      @input=${(event: Event) => {
+                        this.endpointDraft = (event.currentTarget as HTMLInputElement).value;
+                      }}
+                  /></label>
+                  <label
+                    >Token<input
+                      type="password"
+                      autocomplete="off"
+                      .value=${this.token}
+                      @input=${(event: Event) => {
+                        this.token = (event.currentTarget as HTMLInputElement).value;
+                      }}
+                  /></label>
+                  <div class="row">
+                    <button
+                      type="submit"
+                      ?disabled=${view.storage === 'loading' || !endpoint.trim() || !this.token.trim() || view.connection === 'connecting' || view.connection === 'connected'}
+                    >
+                      Connect
                     </button>
-                  `
-                : nothing
-            }
-          </div>
-        </form>
+                    ${
+                      view.connection !== 'offline'
+                        ? html`
+                            <button
+                              type="button"
+                              @click=${() => this.onaction({ type: 'disconnect' })}
+                            >
+                              Disconnect
+                            </button>
+                          `
+                        : nothing
+                    }
+                  </div>
+                </form>
+              `
+        }
       </section>
       <div
         class="notices"

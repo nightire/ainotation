@@ -1,0 +1,198 @@
+:root {
+  font:
+    15px/1.6 system-ui,
+    sans-serif;
+  color: #263330;
+  background: #f5f7f8;
+  color-scheme: light;
+  --accent: #2563ab;
+  --tint: #edf4fc;
+}
+:root[data-framework='vue'] {
+  --accent: #087f65;
+  --tint: #eaf6ef;
+  background: #f4f8f5;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 28px;
+  border-bottom: 1px solid #dce3e2;
+  background: white;
+}
+.brand {
+  font-weight: 650;
+}
+.framework-badge,
+.tag {
+  color: var(--accent);
+  background: var(--tint);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+main {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 44px 28px 120px;
+}
+.eyebrow {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  margin: 0 0 10px;
+}
+h1 {
+  font-size: clamp(30px, 5vw, 42px);
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+  margin: 0 0 16px;
+}
+.intro {
+  color: #63716c;
+  margin: 0 0 32px;
+  max-width: 560px;
+}
+.sample-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 20px;
+}
+.sample-card {
+  min-width: 0;
+  border: 1px solid #dce3e2;
+  border-radius: 14px;
+  background: white;
+  padding: 28px;
+}
+h2 {
+  font-size: 22px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  margin: 20px 0 14px;
+}
+.sample-card p {
+  color: #63716c;
+}
+.metric {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 24px 0;
+}
+.metric strong {
+  font-size: 40px;
+  line-height: 1;
+  color: var(--accent);
+}
+.metric span {
+  color: #63716c;
+  font-size: 13px;
+}
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+button,
+input,
+select {
+  font: inherit;
+}
+button {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #c8d2cd;
+  border-radius: 6px;
+  color: #34443e;
+  background: white;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--tint);
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+button.primary:hover {
+  filter: brightness(0.92);
+  background: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.text-button {
+  margin-top: 16px;
+  border: 0;
+  padding-left: 0;
+  color: var(--accent);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 20px 0 6px;
+}
+input,
+select {
+  display: block;
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid #b8c6be;
+  border-radius: 6px;
+  background: white;
+  color: inherit;
+}
+.profile-preview,
+.detail-box {
+  display: block;
+  margin-top: 24px;
+  padding: 14px;
+  background: var(--tint);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.testing-note {
+  color: #63716c;
+  font-size: 12px;
+  margin-top: 24px;
+}
+code {
+  padding: 2px 4px;
+  background: var(--tint);
+  border-radius: 3px;
+  color: var(--accent);
+}
+@media (max-width: 720px) {
+  .sample-grid {
+    grid-template-columns: 1fr;
+  }
+  main {
+    padding: 28px 18px 110px;
+  }
+  .sample-card {
+    padding: 22px;
+  }
+  .page-header {
+    padding: 16px 18px;
+  }
+}

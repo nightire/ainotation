@@ -76,6 +76,7 @@ it.each(['headers', 'heartbeat'] as const)(
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(subscriptions).toBe(1);
+      expect(fetcher.mock.calls.every(([, options]) => options?.redirect === 'error')).toBe(true);
       await vi.advanceTimersByTimeAsync(stall === 'headers' ? 10001 : 35001);
       expect(states).toContain('error');
       await vi.advanceTimersByTimeAsync(2500);
@@ -91,3 +92,42 @@ it.each(['headers', 'heartbeat'] as const)(
     }
   },
 );
+
+it('cancels pending credential resolution when synchronization stops', async () => {
+  const document = createFeedbackDocument(location.href);
+  let signal: AbortSignal | undefined;
+  const state = vi.fn();
+  const provider = vi.fn((value: AbortSignal) => {
+    signal = value;
+    return new Promise<never>((_resolve, reject) =>
+      value.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {
+        once: true,
+      }),
+    );
+  });
+  const fetcher = vi.spyOn(globalThis, 'fetch');
+  const client = createSyncClient({
+    connection: provider,
+    sessionId: document.id,
+    read: async () => ({
+      document,
+      operations: [],
+      draft: { text: '', editingId: null, targets: [] },
+      authority: null,
+    }),
+    apply: async () => {},
+    onState: state,
+    onSync() {},
+  });
+  try {
+    await vi.waitFor(() => expect(provider).toHaveBeenCalledOnce());
+    client.stop();
+    expect(signal?.aborted).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(state.mock.calls.map(([value]) => value)).toEqual(['connecting']);
+  } finally {
+    client.stop();
+  }
+});
