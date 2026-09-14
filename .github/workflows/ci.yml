@@ -29,6 +29,8 @@ jobs:
           cache: false
       - name: Install browser for integration tests
         run: pnpm --dir packages/sdk exec playwright install --with-deps chrome
+      - name: Build package entry points for a clean checkout
+        run: vp run build:packages
       - run: vp run ready
       - name: Verify publishable tarballs and installed consumers
         run: vp run release:check

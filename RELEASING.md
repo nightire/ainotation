@@ -28,6 +28,12 @@ vp run version-packages
 This produces `1.0.0` from the beta series; stable publishing uses `latest`.
 Do not manually put beta versions on `latest`.
 
+For a brand-new package, npm may also initialize a `latest` tag when publishing
+its first prerelease. After the bootstrap publish, check `npm dist-tag ls` for
+each package and remove that automatically created `latest` tag with
+`npm dist-tag rm @ainotation/<package> latest` in an interactive terminal outside
+the workspace. Keep `beta: 1.0.0-beta.0`; no package version is removed.
+
 ## One-time npm bootstrap
 
 New npm packages must be published once with an authenticated maintainer account
