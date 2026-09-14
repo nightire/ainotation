@@ -1,6 +1,6 @@
 {
   "name": "@ainotation/sdk",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta.1",
   "description": "Framework-independent DOM feedback, live drawing and screenshot annotations",
   "homepage": "https://github.com/nightire/ainotation#readme",
   "bugs": {
