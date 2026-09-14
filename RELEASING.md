@@ -37,9 +37,15 @@ terminal outside this workspace (`npm login`), then publish the reviewed version
 ```sh
 vp run build:packages
 vp run release:check
-vp run release
+vp exec changeset publish
 git push --follow-tags
 ```
+
+Run the initial publish in an interactive terminal and complete npm's 2FA prompt
+there. Changesets may show a generic warning about `latest` for legacy prerelease
+packages; the actual publish plan must show `tag: beta` for this release. Inspect
+it with `vp exec changeset publish-plan`. Do not pass `--tag` while pre mode is
+active; Changesets rejects that combination.
 
 For each package, configure npm Settings → Trusted Publisher:
 
