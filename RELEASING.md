@@ -82,6 +82,11 @@ dependency versions, then installs their tarballs into an isolated temporary
 consumer and checks ESM imports and TypeScript declarations. It requires registry
 access for public dependencies and removes the temporary consumer when done.
 
+CI keeps service, Vite access-control and package validation on Linux. SDK and
+Playground browser interactions, native screenshot capture and touch input run on
+macOS Chrome, matching the verified capture environment. Both jobs must pass
+before the release workflow proceeds; no browser tests are skipped.
+
 All releases include the source-available Ainotation Development and
 Non-Commercial License. Internal development is free; commercial distribution,
 hosted services and production integration require separate written authorization.
