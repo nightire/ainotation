@@ -83,6 +83,24 @@ export async function createScreenCapture(stream: MediaStream, signal: AbortSign
   async function nextFrame() {
     const waitSignal = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
     waitSignal.throwIfAborted();
+    // Let the browser commit the editor's hidden controls before asking the
+    // capture pipeline for its next frame, including on slower CI machines.
+    await new Promise<void>((resolve, reject) => {
+      let frame = 0;
+      const abort = () => {
+        cancelAnimationFrame(frame);
+        reject(uiError('frameWaiting'));
+      };
+      const done = () => {
+        waitSignal.removeEventListener('abort', abort);
+        resolve();
+      };
+      waitSignal.addEventListener('abort', abort, { once: true });
+      frame = requestAnimationFrame(() => {
+        frame = requestAnimationFrame(done);
+      });
+    });
+    waitSignal.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
       let callback = 0;
       let timer: ReturnType<typeof setTimeout> | undefined;

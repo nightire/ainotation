@@ -1277,7 +1277,10 @@ it('captures a real browser tab after live drawing and temporary Alt interaction
     expect(rendered.tooltip[2]!, JSON.stringify(rendered.tooltip)).toBeGreaterThan(200);
     expect(rendered.tooltip[2]! - rendered.tooltip[0]!).toBeGreaterThan(120);
     expect(rendered.tooltip[2]! - rendered.tooltip[1]!).toBeGreaterThan(100);
-    expect(rendered.controls.slice(0, 3).every((channel) => channel > 200)).toBe(true);
+    expect(
+      rendered.controls.slice(0, 3).every((channel) => channel > 200),
+      `Expected host background, got ${JSON.stringify(rendered.controls)}`,
+    ).toBe(true);
     expect(
       await page.evaluate(() =>
         (window as Window & { testCapture?: MediaStream }).testCapture
