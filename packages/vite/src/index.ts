@@ -89,10 +89,26 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
   return {
     name: 'ainotation',
     apply: 'serve',
-    config(config) {
+    async config(config) {
+      const directory = resolve(options.serviceDirectory ?? defaultServiceDirectory());
+      const canonical = await canonicalPath(directory);
       return {
         server: {
           fs: {
+            // Configure before Vite compiles its deny matcher. Mutating this in
+            // configResolved is too late on platforms without path aliasing.
+            deny: [
+              ...(config.server?.fs?.deny ?? [
+                '.env',
+                '.env.*',
+                '*.{crt,pem,key,p12,pfx,cer,der}',
+                '.npmrc',
+                '.yarnrc.yml',
+                '**/.git/**',
+              ]),
+              `${normalizePath(directory)}/**`,
+              `${normalizePath(canonical)}/**`,
+            ],
             allow: [
               ...(config.server?.fs?.allow ?? [
                 searchForWorkspaceRoot(config.root ?? process.cwd()),
@@ -103,16 +119,6 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
           },
         },
       };
-    },
-    async configResolved(config) {
-      const directory = resolve(options.serviceDirectory ?? defaultServiceDirectory());
-      const canonical = await canonicalPath(directory);
-      // Never expose service state via /@fs, even inside a broadly allowed workspace.
-      config.server.fs.deny = [
-        ...config.server.fs.deny,
-        `${normalizePath(directory)}/**`,
-        `${normalizePath(canonical)}/**`,
-      ];
     },
     async configureServer(vite) {
       server = vite;

@@ -200,7 +200,12 @@ it('rejects cross-origin bootstrap and limits browser proxy routes to sync and e
   const a = apps[0]!;
   const b = apps[1]!;
   const handshake = `${a.url}__ainotation/connect`;
-  expect((await fetch(`${a.url}@fs/${shared.directory}/connection.json`)).status).toBe(403);
+  const protectedFile = await fetch(`${a.url}@fs/${shared.directory}/connection.json`);
+  const protectedBody = await protectedFile.text();
+  expect(
+    protectedFile.status,
+    `content-type=${protectedFile.headers.get('content-type')}; exposes credential=${protectedBody.includes(shared.connection.token)}`,
+  ).toBe(403);
   expect(
     (
       await fetch(handshake, {

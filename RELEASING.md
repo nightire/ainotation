@@ -26,13 +26,12 @@ vp run version-packages
 ```
 
 This produces `1.0.0` from the beta series; stable publishing uses `latest`.
-Do not manually put beta versions on `latest`.
-
-For a brand-new package, npm may also initialize a `latest` tag when publishing
-its first prerelease. After the bootstrap publish, check `npm dist-tag ls` for
-each package and remove that automatically created `latest` tag with
-`npm dist-tag rm @ainotation/<package> latest` in an interactive terminal outside
-the workspace. Keep `beta: 1.0.0-beta.0`; no package version is removed.
+For a brand-new package, npm also initializes a `latest` tag and rejects its
+removal. Until a stable release exists, that alias can therefore point to a beta.
+This does not change the SemVer prerelease version. Installation instructions
+explicitly use `@beta`. The publish script sets `beta` or `latest` in the Changesets
+publish plan based on the actual version, then packs and publishes that plan, so
+future beta releases continue to update `beta` even when the initial alias exists.
 
 ## One-time npm bootstrap
 
@@ -43,15 +42,14 @@ terminal outside this workspace (`npm login`), then publish the reviewed version
 ```sh
 vp run build:packages
 vp run release:check
-vp exec changeset publish
+node scripts/publish-packages.mjs
 git push --follow-tags
 ```
 
 Run the initial publish in an interactive terminal and complete npm's 2FA prompt
-there. Changesets may show a generic warning about `latest` for legacy prerelease
-packages; the actual publish plan must show `tag: beta` for this release. Inspect
-it with `vp exec changeset publish-plan`. Do not pass `--tag` while pre mode is
-active; Changesets rejects that combination.
+there. The wrapper explicitly sets prerelease entries to `beta` before packing
+and publishing. Do not pass `--tag` to Changesets while pre mode is active;
+Changesets rejects that combination.
 
 For each package, configure npm Settings → Trusted Publisher:
 
