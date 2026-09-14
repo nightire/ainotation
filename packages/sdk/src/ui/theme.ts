@@ -1,40 +1,71 @@
 import { css } from 'lit';
 
 export const themeStyles = css`
+  /* Happy Hues #5: mint surfaces, forest text and golden primary actions.
+     Derived tones provide readable interaction and danger states. */
   :host {
     --ain-scheme: light;
-    --ain-surface: #fff;
-    --ain-field: #fff;
-    --ain-text: #263330;
-    --ain-muted: #53635d;
-    --ain-border: #ced8d5;
-    --ain-field-border: #bac8c2;
-    --ain-hover: #edf3f0;
-    --ain-accent: #087f75;
-    --ain-accent-hover: #06695f;
-    --ain-on-accent: #fff;
-    --ain-message: #087268;
-    --ain-quote: #edf5f1;
-    --ain-idle: #9aa59f;
-    --ain-error: #c25545;
-    --ain-shadow: #182c2426;
+    --ain-surface: #f2f7f5;
+    --ain-surface-muted: #e2ece7;
+    --ain-field: #fffffe;
+    --ain-text: #00473e;
+    --ain-muted: #475d5b;
+    --ain-border: #b9cdc4;
+    --ain-field-border: #77948a;
+    --ain-hover: #e1ece6;
+    --ain-selected: #fff0d2;
+    --ain-accent: #faae2b;
+    --ain-accent-hover: #eaa022;
+    --ain-on-accent: #00473e;
+    --ain-focus: #00665a;
+    --ain-message: #00665a;
+    --ain-quote: #fae4eb;
+    --ain-quote-border: #ac5474;
+    --ain-idle: #77948a;
+    --ain-success: #00665a;
+    --ain-error: #b8352c;
+    --ain-error-surface: #fbe3de;
+    --ain-shadow: #00332c26;
+    --ain-tooltip: #00332c;
+    --ain-on-tooltip: #fffffe;
+    --ain-guide: #6b8279;
+    --ain-guide-focus: #00665a;
+    --ain-guide-fill: #00665a14;
+    --ain-handle: #fffffe;
+    --ain-crop-edge: #fffffe;
+    --ain-crop-shade: #00332c52;
   }
+  /* Happy Hues #10: teal surfaces, mint secondary text and warm gold. */
   :host([data-theme='dark']) {
     --ain-scheme: dark;
-    --ain-surface: #202923;
-    --ain-field: #151d18;
-    --ain-text: #edf5f0;
-    --ain-muted: #adbbb3;
-    --ain-border: #43534a;
-    --ain-field-border: #516358;
-    --ain-hover: #35453c;
-    --ain-accent: #74d9b1;
-    --ain-accent-hover: #91e6c7;
-    --ain-on-accent: #10271d;
-    --ain-message: #91e6c7;
-    --ain-quote: #273e33;
-    --ain-idle: #7f9588;
-    --ain-error: #f08e7d;
-    --ain-shadow: #00000066;
+    --ain-surface: #004643;
+    --ain-surface-muted: #001e1d;
+    --ain-field: #003532;
+    --ain-text: #fffffe;
+    --ain-muted: #abd1c6;
+    --ain-border: #376f68;
+    --ain-field-border: #7baba0;
+    --ain-hover: #0f5650;
+    --ain-selected: #34594b;
+    --ain-accent: #f9bc60;
+    --ain-accent-hover: #ffcd83;
+    --ain-on-accent: #001e1d;
+    --ain-focus: #f9bc60;
+    --ain-message: #abd1c6;
+    --ain-quote: #0f3433;
+    --ain-quote-border: #abd1c6;
+    --ain-idle: #7baba0;
+    --ain-success: #abd1c6;
+    --ain-error: #ffa19a;
+    --ain-error-surface: #593d3d;
+    --ain-shadow: #001e1d80;
+    --ain-tooltip: #e8e4e6;
+    --ain-on-tooltip: #001e1d;
+    --ain-guide: #abd1c6;
+    --ain-guide-focus: #f9bc60;
+    --ain-guide-fill: #f9bc601c;
+    --ain-handle: #001e1d;
+    --ain-crop-edge: #fffffe;
+    --ain-crop-shade: #001e1d8c;
   }
 `;

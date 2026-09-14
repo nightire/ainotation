@@ -1,11 +1,22 @@
 {
   "name": "@ainotation/vite",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0-beta.0",
+  "description": "Automatic Ainotation injection and local MCP pairing for Vite development servers",
+  "homepage": "https://github.com/nightire/ainotation#readme",
+  "bugs": {
+    "url": "https://github.com/nightire/ainotation/issues"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nightire/ainotation.git",
+    "directory": "packages/vite"
+  },
   "files": [
     "dist"
   ],
   "type": "module",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
       "development": "./src/index.ts",
@@ -13,7 +24,17 @@
       "import": "./dist/index.mjs"
     }
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
+    "prepack": "node ../../scripts/prepare-package.mjs",
     "build": "vp pack",
     "typecheck": "tsc --noEmit",
     "test": "vp test run"

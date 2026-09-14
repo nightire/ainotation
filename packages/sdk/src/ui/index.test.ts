@@ -180,7 +180,7 @@ describe('Inspector shell', () => {
     await openSettings(shell);
     const button = control<HTMLButtonElement>(shell, '#output-detail');
     expect(button.getAttribute('data-level')).toBe('standard');
-    expect(shell.shadowRoot!.querySelector('select, [role="combobox"]')).toBeNull();
+    expect(button.matches('select, [role="combobox"]')).toBe(false);
     const before = structuredClone(shell.view.document);
     for (const [value, index] of [
       ['detailed', 2],

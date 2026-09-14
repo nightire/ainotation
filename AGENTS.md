@@ -29,6 +29,7 @@
 - Inspector 展开为 toolbar 并持续选取，Shift 临时多选、Option/Alt 临时穿透真实页面交互；标注通过页面 marker/popover 就地增删改。Toolbar 提供复制、导出、清除当前页面全部标注、Settings 和关闭，连接配置在 Settings popover 中。收起隐藏页面标记并停止拾取，不删除持久化数据。
 - Trigger 与 toolbar 共用移动锚点；位置和展开方向按项目持久化，卸载、重新挂载和刷新后以收起态恢复，并限制在可见视口内。
 - Ainotation UI 支持 Light / Dark 主题，默认 Light，在 Settings 切换并按项目持久化；主题覆盖 toolbar、trigger、Settings 和 marker/popover，不修改宿主页面配色或反馈快照。
+- UI 国际化使用 SDK 内部类型安全字典与实例级语言状态，不新增 i18n 运行时库。Settings 支持 zh-Hans / zh-Hant / en / ja / ko，首次匹配浏览器语言、回退英文，手动选择按项目持久化；切换不重建编辑器，不翻译用户反馈、页面原文、JSON/MCP 标识或 Markdown 交接结构。
 - 暂不做浏览器扩展、任意 JS 动画倒放、录像/GIF、云端账号和多人协作；源码定位为可选增强。
 - 工具运行时依赖由 SDK 自行提供，不要求宿主安装 Lit；重模块按需加载。
 - 原生资源生命周期独立于 UI 渲染；销毁时清理监听器、动画控制和媒体流。

@@ -6,6 +6,7 @@ import { captureTextRange, rangeBetween, textCaretAt, type TextCaret } from './t
 type Availability = 'available' | 'missing' | 'ambiguous';
 type Options = {
   visible?: boolean;
+  appearance?: { theme: string; cssText: string };
   exclude?: (element: Element) => boolean;
   onChange: () => void;
   onPickingChange?: (picking: boolean) => void;
@@ -184,13 +185,13 @@ export function createSelection(options: Options) {
     element.isConnected && element.ownerDocument === document && !excluded(element);
   const overlay = document.createElement('div');
   overlay.setAttribute('data-ainotation-ui', 'selection');
+  overlay.dataset.theme = options.appearance?.theme ?? 'light';
   overlay.style.cssText =
     'all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483646!important;';
   if (!visible) overlay.style.setProperty('display', 'none', 'important');
   const overlayRoot = overlay.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
-  style.textContent =
-    ':host{pointer-events:none}.rect{position:fixed;box-sizing:border-box;border:2px solid #087f75;background:rgb(8 127 117 / 8%);pointer-events:none}.hover{border-style:dashed}';
+  style.textContent = `${options.appearance?.cssText ?? ''}:host{pointer-events:none}.rect{position:fixed;box-sizing:border-box;border:2px solid var(--ain-guide-focus, #00665a);background:var(--ain-guide-fill, transparent);pointer-events:none}.hover{border-style:dashed}`;
   const drawing = document.createElement('div');
   overlayRoot.append(style, drawing);
   (document.body ?? document.documentElement).append(overlay);
@@ -880,6 +881,9 @@ export function createSelection(options: Options) {
       references.clear();
       watched.clear();
       elementIds = new WeakMap();
+    },
+    setTheme(theme: string) {
+      if (!destroyed && overlay.dataset.theme !== theme) overlay.dataset.theme = theme;
     },
     setVisible,
     setPicking,

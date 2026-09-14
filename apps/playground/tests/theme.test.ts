@@ -40,6 +40,12 @@ it('switches all Inspector surfaces, preserves feedback and restores theme after
     const originalTargets = await shell.evaluate((el) => (el as InspectorShell).view.selected);
     const originalInput = await input.elementHandle();
     const lightSurface = await editor.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(lightSurface).toBe('rgb(242, 247, 245)');
+    const selection = page.locator('[data-ainotation-ui="selection"]');
+    const lightSelection = await selection
+      .locator('.rect')
+      .first()
+      .evaluate((el) => getComputedStyle(el).borderColor);
     await shell.getByRole('button', { name: 'Settings', exact: true }).click();
     await shell.evaluate(async (el) => {
       await Promise.allSettled(
@@ -56,6 +62,14 @@ it('switches all Inspector surfaces, preserves feedback and restores theme after
     await shell.getByRole('button', { name: 'Theme: Light', exact: true }).click();
     await expect.poll(() => markers.getAttribute('data-theme')).toBe('dark');
     const darkSurface = await editor.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(darkSurface).toBe('rgb(0, 70, 67)');
+    expect(await selection.getAttribute('data-theme')).toBe('dark');
+    expect(
+      await selection
+        .locator('.rect')
+        .first()
+        .evaluate((el) => getComputedStyle(el).borderColor),
+    ).not.toBe(lightSelection);
     expect(darkSurface).not.toBe(lightSurface);
     expect(
       await shell.locator('.settings').evaluate((el) => getComputedStyle(el).backgroundColor),
@@ -114,6 +128,42 @@ it('switches all Inspector surfaces, preserves feedback and restores theme after
     await expect.poll(() => markers.getAttribute('data-theme')).toBe('light');
     expect(await editor.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(lightSurface);
     expect(await shell.evaluate((el) => (el as InspectorShell).view.document)).toEqual(saved);
+    const imageData = await page.evaluate(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 360;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = '#fffffe';
+      context.fillRect(0, 0, 640, 360);
+      context.fillStyle = '#00473e';
+      context.font = '28px system-ui';
+      context.fillText('Ainotation · Image review', 45, 85);
+      context.fillStyle = '#475d5b';
+      context.font = '18px system-ui';
+      context.fillText('Keep feedback in context.', 45, 128);
+      return canvas.toDataURL().split(',')[1]!;
+    });
+    for (const theme of ['light', 'dark']) {
+      if (theme === 'dark')
+        await shell.getByRole('button', { name: 'Theme: Light', exact: true }).click();
+      await markers.locator('input[type=file]').setInputFiles({
+        name: 'theme.png',
+        mimeType: 'image/png',
+        buffer: Buffer.from(imageData, 'base64'),
+      });
+      const drawing = page.locator('[data-ainotation-ui="drawing"]');
+      await drawing.getByRole('toolbar').waitFor();
+      expect(await drawing.getAttribute('data-theme')).toBe(theme);
+      expect(
+        await drawing.getByRole('toolbar').evaluate((el) => getComputedStyle(el).backgroundColor),
+      ).toBe(theme === 'dark' ? darkSurface : lightSurface);
+      await drawing.getByRole('button', { name: 'Color', exact: true }).click();
+      await page.screenshot({
+        path: resolve(import.meta.dirname, `../../../output/playwright/theme-drawing-${theme}.png`),
+        scale: 'css',
+      });
+      await drawing.getByRole('button', { name: 'Cancel drawing', exact: true }).click();
+    }
     expect(errors).toEqual([]);
   } finally {
     await Promise.all([browser?.close(), web.close()]);

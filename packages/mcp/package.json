@@ -1,7 +1,17 @@
 {
   "name": "@ainotation/mcp",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0-beta.0",
+  "description": "Local, workspace-scoped MCP service for Ainotation feedback and image attachments",
+  "homepage": "https://github.com/nightire/ainotation#readme",
+  "bugs": {
+    "url": "https://github.com/nightire/ainotation/issues"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nightire/ainotation.git",
+    "directory": "packages/mcp"
+  },
   "bin": {
     "ainotation-mcp": "./dist/cli.mjs"
   },
@@ -9,6 +19,7 @@
     "dist"
   ],
   "type": "module",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
       "development": "./src/index.ts",
@@ -46,7 +57,41 @@
       "import": "./dist/project-registration.mjs"
     }
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./project": {
+        "types": "./dist/project.d.mts",
+        "import": "./dist/project.mjs"
+      },
+      "./service": {
+        "types": "./dist/shared-service.d.mts",
+        "import": "./dist/shared-service.mjs"
+      },
+      "./discovery": {
+        "types": "./dist/service-discovery.d.mts",
+        "import": "./dist/service-discovery.mjs"
+      },
+      "./bridge": {
+        "types": "./dist/project-mcp.d.mts",
+        "import": "./dist/project-mcp.mjs"
+      },
+      "./browser": {
+        "types": "./dist/browser-connection.d.mts",
+        "import": "./dist/browser-connection.mjs"
+      },
+      "./registration": {
+        "types": "./dist/project-registration.d.mts",
+        "import": "./dist/project-registration.mjs"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
+    "prepack": "node ../../scripts/prepare-package.mjs",
     "build": "vp pack",
     "start": "node dist/cli.mjs",
     "test": "vp test run",

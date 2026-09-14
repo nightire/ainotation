@@ -1,0 +1,98 @@
+Ainotation Development and Non-Commercial License 1.0
+
+Copyright (c) 2026 nightire
+
+1. Definitions
+
+"Licensor" means the copyright holder identified above. "Software" means the
+Ainotation source code, packages, documentation and other materials made available
+under this license, together with modifications and derivative works of those
+materials. Third-party materials remain subject to their own licenses.
+
+"Development Use" means using the Software internally to design, develop, test,
+debug, review or maintain software. Development Use includes these activities by
+individuals and organizations developing commercial applications, provided that
+the Software is used only as a development tool and is not provided to customers,
+deployed as part of a production product, or offered as a service.
+
+"Non-Commercial Use" means use that is not primarily intended for or directed
+toward commercial advantage or monetary compensation.
+
+"Commercial Use" includes selling, licensing for a fee, renting, commercially
+distributing, or providing hosted access to the Software or a derivative work;
+including or deploying the Software as part of a commercial product or service;
+and other use for commercial advantage or monetary compensation. Permitted
+Development Use is an express exception to this definition.
+
+2. Permitted use
+
+Subject to this license, Licensor grants you a worldwide, non-exclusive,
+royalty-free license under Licensor's copyright to use, reproduce and modify the
+Software for Development Use and Non-Commercial Use. You may distribute the
+Software and derivative works for Non-Commercial Use, subject to section 4.
+
+Internal Development Use is permitted even when the application being developed
+is commercial. This permission does not authorize distributing or providing
+Ainotation itself, including modified or bundled copies, as part of commercial
+software or a commercial service.
+
+Applications developed with the Software that do not contain the Software, and
+feedback, screenshots and other output created using the Software, are not
+subject to this license merely because the Software was used to create them.
+Rights in third-party content included in such output are unaffected.
+
+Hosting unmodified copies of the source code or package archives on public
+source-code hosting platforms, public package registries and their mirrors is
+permitted. This exception does not authorize selling the Software or providing
+its functionality as a commercial hosted service.
+
+3. Commercial authorization
+
+Commercial Use requires a separate written authorization or commercial license
+from Licensor before that use begins. No commercial authorization is granted by
+this license, by public availability of the source code, by publication on npm,
+or by failure to enforce a provision on any particular occasion.
+
+Contact the maintainer identified at https://github.com/nightire/ainotation to
+request commercial authorization. Any separate written agreement with Licensor
+governs the uses expressly covered by that agreement.
+
+4. Redistribution conditions
+
+Every permitted redistribution of the Software or a derivative work must retain
+this license, the copyright notice and any applicable third-party notices. You
+must clearly identify material modifications you make. You may not remove or
+circumvent the Commercial Use restriction, or represent that recipients receive
+commercial rights under this license. Recipients receive rights directly from
+Licensor under these same terms; you may not grant broader rights to Licensor's
+Software than you have received.
+
+This license does not restrict independently created code solely because it
+interoperates with the Software. It does not grant rights in third-party works,
+trademarks, logos, service marks or patents.
+
+5. Termination
+
+Your rights under this license terminate automatically if you violate its terms.
+If the violation is your first, your rights are reinstated when you cease the
+violation and remedy it within 30 days after becoming aware of it. Reinstatement
+does not excuse past violations or waive any claims. Provisions concerning
+commercial authorization, notices, disclaimers and liability survive termination.
+
+6. Disclaimer of warranty and limitation of liability
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT
+PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL LICENSOR OR CONTRIBUTORS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+7. Reservation of rights
+
+All rights not expressly granted are reserved. This is a source-available license
+with commercial-use restrictions, not an OSI-approved open-source license. If a
+provision is unenforceable, the remaining provisions remain in effect to the
+extent permitted by applicable law. Changes to this license apply to a copy of
+the Software only when that copy is offered under the changed license.

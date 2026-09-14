@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, type PropertyValues } from 'lit';
 import { Copy, createElement, Download, Settings, Trash2, X, Sun, Moon } from 'lucide';
 import { themeStyles } from './theme';
+import { messages, locales, languageNames, isLocale } from '../i18n';
 import {
   TRIGGER_SIZE,
   TOOLBAR_WIDTH,
@@ -105,7 +106,8 @@ export class InspectorShell extends LitElement {
       font-size: 12px;
     }
     button,
-    input {
+    input,
+    select {
       font: inherit;
     }
     button {
@@ -209,13 +211,13 @@ export class InspectorShell extends LitElement {
       background: var(--ain-idle);
     }
     .connection-status[data-state='connected']::before {
-      background: var(--ain-accent);
+      background: var(--ain-success);
     }
     .connection-status[data-state='error']::before {
       background: var(--ain-error);
     }
     .toolbar:focus-within {
-      border-color: var(--ain-accent);
+      border-color: var(--ain-focus);
     }
     .notices:empty {
       display: none;
@@ -234,7 +236,7 @@ export class InspectorShell extends LitElement {
       pointer-events: none;
     }
     .toolbar .icon:focus-visible {
-      outline-color: var(--ain-accent);
+      outline-color: var(--ain-focus);
     }
     @media (prefers-reduced-motion: no-preference) {
       .icon {
@@ -243,8 +245,9 @@ export class InspectorShell extends LitElement {
     }
     button:focus-visible,
     header:focus-visible,
-    input:focus-visible {
-      outline: 2px solid var(--ain-accent);
+    input:focus-visible,
+    select:focus-visible {
+      outline: 2px solid var(--ain-focus);
       outline-offset: 2px;
     }
     svg {
@@ -273,6 +276,15 @@ export class InspectorShell extends LitElement {
       display: grid;
       gap: 9px;
       padding-top: 4px;
+    }
+    .language-choice {
+      max-width: 160px;
+      min-height: 28px;
+      padding: 2px 6px;
+      border: 1px solid var(--ain-border);
+      border-radius: 4px;
+      color: var(--ain-text);
+      background: var(--ain-field);
     }
     .output-detail {
       display: flex;
@@ -417,6 +429,7 @@ export class InspectorShell extends LitElement {
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     this.dataset.theme = this.view.theme;
+    this.lang = this.view.locale;
     if (!changed.has('expanded') || !this.hasUpdated) return;
     if (!this.expanded) this.settingsOpen = false;
     this.finishDrag();
@@ -434,7 +447,7 @@ export class InspectorShell extends LitElement {
     if (!this.isConnected) return;
     this.clampPosition();
     if (this.focusExpanded === this.expanded) {
-      const selector = this.expanded ? 'button[aria-label="Close inspector"]' : '.launcher';
+      const selector = this.expanded ? 'button[data-command="close"]' : '.launcher';
       this.renderRoot.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
     }
     this.focusExpanded = undefined;
@@ -491,7 +504,7 @@ export class InspectorShell extends LitElement {
       event.stopImmediatePropagation();
       this.settingsOpen = false;
       this.renderRoot
-        .querySelector<HTMLButtonElement>('[aria-label="Settings"]')
+        .querySelector<HTMLButtonElement>('[data-command="settings"]')
         ?.focus({ preventScroll: true });
       return;
     }
@@ -686,6 +699,7 @@ export class InspectorShell extends LitElement {
 
   override render() {
     const view = this.view;
+    const m = messages(view.locale);
     const detailIndex = Math.max(
       0,
       outputDetails.findIndex((detail) => detail.value === view.outputDetail),
@@ -694,23 +708,23 @@ export class InspectorShell extends LitElement {
     const nextDetail = outputDetails[(detailIndex + 1) % outputDetails.length]!;
     const endpoint = this.endpointDraft ?? view.endpoint;
     const connectionLabel = {
-      offline: 'Offline',
-      connecting: 'Connecting',
-      connected: 'Connected',
-      error: 'Error',
+      offline: m.offline,
+      connecting: m.connecting,
+      connected: m.connected,
+      error: m.error,
     }[view.connection];
     const notices = html`
-      ${view.storage === 'loading' ? html`<p>Loading local feedback...</p>` : nothing}
-      ${view.storage === 'unavailable' ? html`<p>Local storage unavailable. Changes are not saved locally.</p>` : nothing}
-      ${view.syncing ? html`<p>Syncing feedback...</p>` : nothing}
+      ${view.storage === 'loading' ? html`<p>${m.loadingLocal}</p>` : nothing}
+      ${view.storage === 'unavailable' ? html`<p>${m.storageNotice}</p>` : nothing}
+      ${view.syncing ? html`<p>${m.syncing}</p>` : nothing}
       ${view.message ? html`<p class="message">${view.message}</p>` : nothing}
     `;
     return html`
       <button
         class="launcher primary"
         type="button"
-        aria-label="Open inspector"
-        title="Open inspector (Option/Alt + Shift + A)"
+        aria-label=${m.openInspector}
+        title=${m.shortcut(m.openInspector, 'Option/Alt + Shift + A')}
         aria-keyshortcuts="Alt+Shift+A"
         aria-expanded=${this.expanded}
         aria-controls="inspector-toolbar"
@@ -727,21 +741,21 @@ export class InspectorShell extends LitElement {
         id="inspector-toolbar"
         class="toolbar"
         role="toolbar"
-        aria-label="Ainotation inspector"
+        aria-label=${m.inspector}
         ?hidden=${!this.expanded}
       >
         <header
           role="group"
           tabindex="0"
-          aria-label="Move inspector"
+          aria-label=${m.moveInspector}
           @pointerdown=${this.onPointerDown}
           @keydown=${this.onMoveKey}
         >
           <button
             class="icon"
             type="button"
-            aria-label="Copy feedback"
-            title="Copy feedback from all pages in this project"
+            aria-label=${m.copy}
+            title=${m.copyHint}
             ?disabled=${!view.document}
             @click=${() => this.onaction({ type: 'copy' })}
           >
@@ -750,8 +764,8 @@ export class InspectorShell extends LitElement {
           <button
             class="icon"
             type="button"
-            aria-label=${view.document?.annotations.some((annotation) => annotation.images?.length) ? 'Export feedback and images' : 'Export JSON'}
-            title=${view.document?.annotations.some((annotation) => annotation.images?.length) ? 'Export this page with image attachments' : 'Export JSON for this page'}
+            aria-label=${view.document?.annotations.some((annotation) => annotation.images?.length) ? m.exportImages : m.exportJson}
+            title=${view.document?.annotations.some((annotation) => annotation.images?.length) ? m.exportImagesHint : m.exportJsonHint}
             ?disabled=${!view.document}
             @click=${() => this.onaction({ type: 'export' })}
           >
@@ -760,8 +774,8 @@ export class InspectorShell extends LitElement {
           <button
             class="icon"
             type="button"
-            aria-label="Clear all annotations"
-            title="Clear all annotations on this page"
+            aria-label=${m.clear}
+            title=${m.clearHint}
             ?disabled=${view.saving || view.storage === 'loading' || (!view.document?.annotations.length && !view.selected.length && !view.draft)}
             @click=${() => this.onaction({ type: 'clear-all' })}
           >
@@ -770,8 +784,9 @@ export class InspectorShell extends LitElement {
           <button
             class="icon"
             type="button"
-            aria-label="Settings"
-            title="Settings"
+            aria-label=${m.settings}
+            title=${m.settings}
+            data-command="settings"
             aria-expanded=${this.settingsOpen}
             aria-controls="inspector-settings"
             aria-haspopup="dialog"
@@ -783,8 +798,9 @@ export class InspectorShell extends LitElement {
           <button
             class="icon"
             type="button"
-            aria-label="Close inspector"
-            title="Close inspector (Option/Alt + Shift + A)"
+            aria-label=${m.closeInspector}
+            title=${m.shortcut(m.closeInspector, 'Option/Alt + Shift + A')}
+            data-command="close"
             aria-keyshortcuts="Alt+Shift+A"
             @click=${() => this.expand(false)}
           >
@@ -796,62 +812,75 @@ export class InspectorShell extends LitElement {
         class="settings"
         id="inspector-settings"
         role="dialog"
-        aria-label="Inspector settings"
+        aria-label=${m.inspectorSettings}
         tabindex="-1"
         ?hidden=${!this.expanded || !this.settingsOpen}
       >
         <div class="settings-heading">
-          <h2>Settings</h2>
+          <h2>${m.settings}</h2>
           <span class="connection-status" data-state=${view.connection} role="status"
             >${connectionLabel}</span
           >
         </div>
         <div class="output-detail">
-          <label class="detail-label" for="inspector-theme">Theme</label>
+          <label class="detail-label" for="inspector-language">${m.language}</label>
+          <select
+            id="inspector-language"
+            class="language-choice"
+            aria-label=${m.language}
+            @change=${(event: Event) => {
+              const value = (event.currentTarget as HTMLSelectElement).value;
+              if (isLocale(value)) this.onaction({ type: 'set-locale', value });
+            }}
+          >
+            ${locales.map((locale) => html`<option value=${locale} lang=${locale} ?selected=${view.locale === locale}>${languageNames[locale]}</option>`)}
+          </select>
+        </div>
+        <div class="output-detail">
+          <label class="detail-label" for="inspector-theme">${m.theme}</label>
           <button
             id="inspector-theme"
             class="detail-choice"
             type="button"
-            aria-label=${`Theme: ${view.theme === 'dark' ? 'Dark' : 'Light'}`}
-            title=${`Switch to ${view.theme === 'dark' ? 'light' : 'dark'} mode`}
+            aria-label=${m.labeled(m.theme, view.theme === 'dark' ? m.dark : m.light)}
+            title=${m.switchTheme(view.theme === 'dark' ? m.light : m.dark)}
             @click=${() => this.onaction({ type: 'set-theme', value: view.theme === 'dark' ? 'light' : 'dark' })}
           >
-            <span>${view.theme === 'dark' ? 'Dark' : 'Light'}</span
+            <span>${view.theme === 'dark' ? m.dark : m.light}</span
             >${icon(view.theme === 'dark' ? Moon : Sun)}
           </button>
         </div>
         <div class="output-detail">
-          <label class="detail-label" for="output-detail">Output Detail</label>
+          <label class="detail-label" for="output-detail">${m.detail}</label>
           <button
             class="detail-choice"
             type="button"
             id="output-detail"
             data-level=${currentDetail.value}
-            aria-label=${`Output Detail: ${currentDetail.label}`}
-            title=${`Switch to ${nextDetail.label}`}
+            aria-label=${m.labeled(m.detail, m[currentDetail.value])}
+            title=${m.switchTo(m[nextDetail.value])}
             aria-describedby="output-detail-description"
             @click=${() => this.onaction({ type: 'set-output-detail', value: nextDetail.value })}
           >
-            <span>${currentDetail.label}</span>
+            <span>${m[currentDetail.value]}</span>
             <span class="detail-dots" aria-hidden="true"
               >${outputDetails.map((detail) => html`<span class=${`detail-dot${detail.value === currentDetail.value ? ' active' : ''}`}></span>`)}</span
             >
           </button>
         </div>
         <p class="detail-description" id="output-detail-description">
-          ${outputDetails.find((detail) => detail.value === view.outputDetail)?.description} Applies
-          to copied Markdown.
+          ${m[`${currentDetail.value}Description`]} ${m.copiedMarkdown}
         </p>
-        <p>MCP connection</p>
+        <p>${m.connection}</p>
         ${
           view.managedConnection
             ? html`<p class="muted">${view.projectName}</p>
                 <p class="muted">
-                  ${view.connection === 'connected' ? 'Connected through the development server.' : 'Automatic connection through the development server.'}
+                  ${view.connection === 'connected' ? m.automaticConnected : m.automaticConnection}
                 </p>`
             : html`
                 <p class="muted">
-                  ${view.connection === 'connected' ? 'Feedback sync is connected to the local MCP server.' : 'Local feedback is available. Connect a local MCP server to share it with your agent.'}
+                  ${view.connection === 'connected' ? m.manualConnected : m.manualConnection}
                 </p>
                 <form
                   class="connection-form"
@@ -870,7 +899,7 @@ export class InspectorShell extends LitElement {
                   }}
                 >
                   <label
-                    >Endpoint<input
+                    >${m.endpoint}<input
                       type="url"
                       required
                       .value=${endpoint}
@@ -880,7 +909,7 @@ export class InspectorShell extends LitElement {
                       }}
                   /></label>
                   <label
-                    >Token<input
+                    >${m.token}<input
                       type="password"
                       autocomplete="off"
                       .value=${this.token}
@@ -893,7 +922,7 @@ export class InspectorShell extends LitElement {
                       type="submit"
                       ?disabled=${view.storage === 'loading' || !endpoint.trim() || !this.token.trim() || view.connection === 'connecting' || view.connection === 'connected'}
                     >
-                      Connect
+                      ${m.connect}
                     </button>
                     ${
                       view.connection !== 'offline'
@@ -902,7 +931,7 @@ export class InspectorShell extends LitElement {
                               type="button"
                               @click=${() => this.onaction({ type: 'disconnect' })}
                             >
-                              Disconnect
+                              ${m.disconnect}
                             </button>
                           `
                         : nothing

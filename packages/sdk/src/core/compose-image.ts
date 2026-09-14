@@ -1,5 +1,6 @@
 import { canvasBlob, imageCanvas } from './images';
 import { cropPixels, type ImageCrop } from './crop';
+import { uiError } from '../i18n';
 
 /** Render tool-owned SVG over an imported bitmap, releasing every temporary resource. */
 export async function composeImage(
@@ -16,7 +17,7 @@ export async function composeImage(
   try {
     image.src = url;
     await new Promise<void>((resolve, reject) => {
-      const abort = () => reject(new Error('Image composition stopped or timed out.'));
+      const abort = () => reject(uiError('composeTimeout'));
       if (bound.aborted) {
         abort();
         return;
@@ -29,7 +30,7 @@ export async function composeImage(
     });
     signal.throwIfAborted();
     const context = canvas.getContext('2d');
-    if (!context) throw new Error('Image drawing is unavailable.');
+    if (!context) throw uiError('drawingUnavailable');
     if (crop) {
       const region = cropPixels(crop, bitmap.width, bitmap.height);
       context.drawImage(

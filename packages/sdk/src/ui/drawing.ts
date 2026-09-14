@@ -22,6 +22,7 @@ import { createScreenCapture } from '../core/capture';
 import { drawingStyles } from './drawing-styles';
 import { createDrawingLayer } from './drawing-layer';
 import { bindDrawingPointerEvents } from './drawing-input';
+import { createI18n, formatMessage, errorMessage, msg, type I18n, type UiMessage } from '../i18n';
 import {
   shapeBounds,
   moveShape,
@@ -64,15 +65,6 @@ const toolKeys: Record<Tool, string> = {
   pen: 'f',
   crop: 'x',
 };
-const toolLabels: Record<Tool, string> = {
-  select: 'Select / move',
-  arrow: 'Arrow',
-  rectangle: 'Rectangle',
-  ellipse: 'Ellipse',
-  pen: 'Free draw',
-  crop: 'Crop',
-};
-const colorLabels = ['Red', 'Amber', 'Green', 'Blue', 'White', 'Black'];
 const icon = (value: typeof Check) =>
   createElement(value, { width: 18, height: 18, 'aria-hidden': 'true', focusable: 'false' });
 
@@ -85,6 +77,7 @@ function rotationCursor(angle: number) {
 }
 
 export async function createDrawingEditor(options: {
+  i18n?: I18n;
   source: { stream: MediaStream } | { blob: Blob };
   theme: InspectorTheme;
   signal: AbortSignal;
@@ -93,6 +86,11 @@ export async function createDrawingEditor(options: {
 }) {
   const lifetime = new AbortController();
   const signal = AbortSignal.any([options.signal, lifetime.signal]);
+  const i18n = options.i18n ?? createI18n();
+  let m = i18n.messages;
+  const toolLabel = (value: Tool) =>
+    value === 'select' ? m.selectMove : value === 'pen' ? m.freeDraw : m[value];
+  const colorLabels = () => [m.red, m.amber, m.green, m.blue, m.white, m.black];
   const source = options.source;
   const capture = 'stream' in source ? await createScreenCapture(source.stream, signal) : null;
   const bitmap = 'blob' in source ? await decodeImage(source.blob) : null;
@@ -185,7 +183,7 @@ export async function createDrawingEditor(options: {
   const passed = new Set<number>();
   let busy = false;
   let closed = false;
-  let notice = '';
+  let notice: string | UiMessage = '';
   let tooltipTarget: HTMLElement | null = null;
   function showTooltip(target: HTMLElement | null) {
     if (
@@ -292,7 +290,7 @@ export async function createDrawingEditor(options: {
       mode = 'marquee';
     } else {
       if (shapes.length >= 200) {
-        notice = 'Up to 200 shapes per image.';
+        notice = msg('shapesLimit');
         paint();
         return;
       }
@@ -434,7 +432,7 @@ export async function createDrawingEditor(options: {
       const right = Math.max(...bounds.map((box) => box.right)) + padding;
       const bottom = Math.max(...bounds.map((box) => box.bottom)) + padding;
       return svg`<rect data-group-selection=${selected.size} x=${left} y=${top} width=${right - left} height=${bottom - top}
-        fill="none" stroke="#94a3b8" stroke-width=${unit} stroke-dasharray=${`${4 * unit} ${3 * unit}`} pointer-events="stroke" style="cursor:move"/>`;
+        fill="none" stroke="var(--ain-guide)" stroke-width=${unit} stroke-dasharray=${`${4 * unit} ${3 * unit}`} pointer-events="stroke" style="cursor:move"/>`;
     }
     const shape = shapes[primaryIndex()];
     if (!shape || busy) return nothing;
@@ -447,11 +445,11 @@ export async function createDrawingEditor(options: {
     return svg`<g data-controls=${primaryIndex()} transform=${shapeTransform(shape)}>
       ${
         !arrow
-          ? svg`<circle data-control="rotate" cx=${handle.x} cy=${handle.y} r=${25 * unit} fill="transparent" pointer-events="all" class="rotate-control"><title>Drag outside the square to rotate</title></circle>`
+          ? svg`<circle data-control="rotate" cx=${handle.x} cy=${handle.y} r=${25 * unit} fill="transparent" pointer-events="all" class="rotate-control"><title>${m.rotateHint}</title></circle>`
           : nothing
       }
-      <circle data-control="resize" cx=${handle.x} cy=${handle.y} r=${12 * unit} fill="transparent" pointer-events="all" style=${`cursor:${arrow ? 'crosshair' : diagonal}`}><title>${arrow ? 'Drag the tail to change length and direction' : 'Drag to resize'}</title></circle>
-      <rect class="control-handle" x=${handle.x - 3 * unit} y=${handle.y - 3 * unit} width=${6 * unit} height=${6 * unit} fill="white" stroke="#94a3b8" stroke-width=${unit} pointer-events="none"/>
+      <circle data-control="resize" cx=${handle.x} cy=${handle.y} r=${12 * unit} fill="transparent" pointer-events="all" style=${`cursor:${arrow ? 'crosshair' : diagonal}`}><title>${arrow ? m.arrowTailHint : m.resizeHint}</title></circle>
+      <rect class="control-handle" x=${handle.x - 3 * unit} y=${handle.y - 3 * unit} width=${6 * unit} height=${6 * unit} fill="var(--ain-handle)" stroke="var(--ain-guide)" stroke-width=${unit} pointer-events="none"/>
     </g>`;
   }
   function marqueeSvg() {
@@ -459,7 +457,7 @@ export async function createDrawingEditor(options: {
     const box = selectionBox(gesture.start, gesture.current),
       unit = pixelUnit();
     return svg`<rect data-marquee x=${box.left} y=${box.top} width=${box.right - box.left} height=${box.bottom - box.top}
-      fill="rgba(59,130,246,.08)" stroke="#60a5fa" stroke-width=${unit} stroke-dasharray=${`${4 * unit} ${3 * unit}`} pointer-events="none"/>`;
+      fill="var(--ain-guide-fill)" stroke="var(--ain-guide-focus)" stroke-width=${unit} stroke-dasharray=${`${4 * unit} ${3 * unit}`} pointer-events="none"/>`;
   }
   function cropSvg() {
     if (busy || !crop) return nothing;
@@ -470,18 +468,20 @@ export async function createDrawingEditor(options: {
       width = box.right - box.left,
       height = box.bottom - box.top;
     return svg`<g data-crop-guide pointer-events="none">
-      <path d=${`M${bounds.left} ${bounds.top}H${bounds.right}V${bounds.bottom}H${bounds.left}Z M${box.left} ${box.top}V${box.bottom}H${box.right}V${box.top}Z`} fill="rgba(0,0,0,.3)" fill-rule="evenodd"/>
-      <rect data-crop-area data-crop-move x=${box.left} y=${box.top} width=${width} height=${height} fill="transparent" stroke="white" stroke-width=${unit} stroke-dasharray=${`${5 * unit} ${3 * unit}`} pointer-events=${tool === 'crop' ? 'all' : 'none'} style="cursor:move"/>
+      <path d=${`M${bounds.left} ${bounds.top}H${bounds.right}V${bounds.bottom}H${bounds.left}Z M${box.left} ${box.top}V${box.bottom}H${box.right}V${box.top}Z`} fill="var(--ain-crop-shade)" fill-rule="evenodd"/>
+      <rect data-crop-area data-crop-move x=${box.left} y=${box.top} width=${width} height=${height} fill="transparent" stroke="var(--ain-crop-edge)" stroke-width=${unit} stroke-dasharray=${`${5 * unit} ${3 * unit}`} pointer-events=${tool === 'crop' ? 'all' : 'none'} style="cursor:move"/>
       ${
         tool === 'crop'
           ? svg`<rect data-crop-resize x=${box.right - 12 * unit} y=${box.bottom - 12 * unit} width=${24 * unit} height=${24 * unit} fill="transparent" pointer-events="all" style="cursor:nwse-resize"/>
-        <rect x=${box.right - 3 * unit} y=${box.bottom - 3 * unit} width=${6 * unit} height=${6 * unit} fill="white" stroke="#94a3b8" stroke-width=${unit}/>`
+        <rect x=${box.right - 3 * unit} y=${box.bottom - 3 * unit} width=${6 * unit} height=${6 * unit} fill="var(--ain-handle)" stroke="var(--ain-guide)" stroke-width=${unit}/>`
           : nothing
       }
     </g>`;
   }
   function paint() {
     if (closed) return;
+    m = i18n.messages;
+    if (host.lang !== i18n.locale) host.lang = i18n.locale;
     const pass = passthrough();
     if (busy || pass) openPalette = null;
     const viewBox = bitmap
@@ -491,36 +491,36 @@ export async function createDrawingEditor(options: {
       html` <style>
           ${drawingStyles}
         </style>
-        <div class="editor" role="region" aria-label="Image annotation editor">
+        <div class="editor" role="region" aria-label=${m.imageEditor}>
           <div class=${`stage${bitmap ? ' import' : ''}${pass ? ' pass' : ''}`}>
             <div
               class=${bitmap ? 'image-stage' : ''}
               style=${bitmap ? `width:min(${bitmap.width}px,calc((100vh - 130px) * ${bitmap.width / bitmap.height}));aspect-ratio:${bitmap.width}/${bitmap.height}` : ''}
             >
-              ${imageUrl ? html`<img src=${imageUrl} alt="Image to annotate" />` : nothing}
+              ${imageUrl ? html`<img src=${imageUrl} alt=${m.imageToAnnotate} />` : nothing}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 class=${`drawing-surface${tool === 'select' ? ' select' : ''}${gesture?.mode === 'rotate' ? ' rotating' : ''}`}
                 style=${`--rotation-cursor:${rotationCursor(shapes[primaryIndex()]?.rotation ?? 0)}`}
                 viewBox=${viewBox}
-                aria-label="Drawing surface"
+                aria-label=${m.drawingSurface}
               >
                 ${shapes.map(shapeSvg)} ${controlsSvg()} ${marqueeSvg()} ${cropSvg()}
               </svg>
             </div>
           </div>
-          ${notice && !busy ? html`<div class="notice" role="status">${notice}</div>` : nothing}
+          ${notice && !busy ? html`<div class="notice" role="status">${formatMessage(i18n.locale, notice)}</div>` : nothing}
           <div
             class=${`toolbar${pass ? ' pass' : ''}`}
             role="toolbar"
-            aria-label="Drawing tools"
+            aria-label=${m.drawingTools}
             ?hidden=${busy}
           >
             ${Object.entries(tools).map(
               ([name, symbol]) =>
                 html`<button
-                  aria-label=${name[0]!.toUpperCase() + name.slice(1)}
-                  data-tooltip=${`${toolLabels[name as Tool]} (${toolKeys[name as Tool].toUpperCase()})`}
+                  aria-label=${m[name as Tool]}
+                  data-tooltip=${m.shortcut(toolLabel(name as Tool), toolKeys[name as Tool].toUpperCase())}
                   aria-keyshortcuts=${toolKeys[name as Tool]}
                   aria-pressed=${tool === name}
                   data-tool=${name}
@@ -531,8 +531,8 @@ export async function createDrawingEditor(options: {
             <span class="separator"></span>
             <button
               class="color-trigger"
-              aria-label="Color"
-              data-tooltip=${`Color: ${colorLabels[colors.indexOf(activeColor())]} (C to cycle)`}
+              aria-label=${m.color}
+              data-tooltip=${m.colorCycle(colorLabels()[colors.indexOf(activeColor())]!)}
               aria-keyshortcuts="c"
               aria-haspopup="dialog"
               aria-expanded=${openPalette === 'color'}
@@ -544,8 +544,8 @@ export async function createDrawingEditor(options: {
             <span class="separator"></span>
             <button
               class="stroke-width"
-              aria-label="Line width"
-              data-tooltip="Line width (S to cycle)"
+              aria-label=${m.lineWidth}
+              data-tooltip=${m.widthCycle}
               aria-keyshortcuts="s"
               data-action="width-palette"
               aria-haspopup="listbox"
@@ -555,8 +555,8 @@ export async function createDrawingEditor(options: {
               <span>${activeWidth()} px</span>${icon(ChevronDown)}
             </button>
             <button
-              aria-label="Undo"
-              data-tooltip="Undo (Command / Ctrl + Z)"
+              aria-label=${m.undo}
+              data-tooltip=${m.shortcut(m.undo, 'Command / Ctrl + Z')}
               aria-keyshortcuts="Meta+z Control+z"
               ?disabled=${!undo.length}
               data-action="undo"
@@ -564,8 +564,8 @@ export async function createDrawingEditor(options: {
               ${icon(Undo2)}
             </button>
             <button
-              aria-label="Redo"
-              data-tooltip="Redo (Command / Ctrl + Shift + Z)"
+              aria-label=${m.redo}
+              data-tooltip=${m.shortcut(m.redo, 'Command / Ctrl + Shift + Z')}
               aria-keyshortcuts="Meta+Shift+z Control+Shift+z"
               ?disabled=${!redo.length}
               data-action="redo"
@@ -573,8 +573,8 @@ export async function createDrawingEditor(options: {
               ${icon(Redo2)}
             </button>
             <button
-              aria-label=${tool === 'crop' ? 'Clear crop' : 'Delete shape'}
-              data-tooltip=${tool === 'crop' ? 'Clear crop (D)' : selected.size > 1 ? `Delete ${selected.size} shapes (D)` : 'Delete shape (D)'}
+              aria-label=${tool === 'crop' ? m.clearCrop : m.deleteShape}
+              data-tooltip=${m.shortcut(tool === 'crop' ? m.clearCrop : selected.size > 1 ? m.deleteShapes(selected.size) : m.deleteShape, 'D')}
               aria-keyshortcuts="d"
               ?disabled=${tool === 'crop' ? !crop : selected.size === 0}
               data-action="delete"
@@ -583,8 +583,8 @@ export async function createDrawingEditor(options: {
             </button>
             <span class="separator"></span>
             <button
-              aria-label="Cancel drawing"
-              data-tooltip="Cancel drawing (Esc)"
+              aria-label=${m.cancelDrawing}
+              data-tooltip=${m.shortcut(m.cancelDrawing, 'Esc')}
               aria-keyshortcuts="Escape"
               data-action="cancel"
             >
@@ -592,8 +592,8 @@ export async function createDrawingEditor(options: {
             </button>
             <button
               class="save"
-              aria-label=${capture ? 'Capture and attach' : 'Attach image'}
-              data-tooltip=${capture ? 'Capture and attach (Command / Ctrl + Enter; hold Option / Alt to interact with the page)' : 'Attach image (Command / Ctrl + Enter)'}
+              aria-label=${capture ? m.captureAttach : m.attachImage}
+              data-tooltip=${capture ? m.captureHint : m.shortcut(m.attachImage, 'Command / Ctrl + Enter')}
               aria-keyshortcuts="Meta+Enter Control+Enter"
               data-action="save"
             >
@@ -606,14 +606,14 @@ export async function createDrawingEditor(options: {
                   id="ainotation-color-palette"
                   class="palette color-popover"
                   role="dialog"
-                  aria-label="Color palette"
+                  aria-label=${m.colorPalette}
                 >
                   ${colors.map(
                     (value, index) => html`<button
                       class="swatch"
                       style=${`background:${value}`}
-                      aria-label=${`Color ${value}`}
-                      data-tooltip=${colorLabels[index]}
+                      aria-label=${m.colorValue(value)}
+                      data-tooltip=${colorLabels()[index]}
                       aria-pressed=${activeColor() === value}
                       data-color=${value}
                       ?data-highlighted=${paletteIndex === index}
@@ -628,7 +628,7 @@ export async function createDrawingEditor(options: {
                   id="ainotation-width-palette"
                   class="palette width-popover"
                   role="listbox"
-                  aria-label="Line widths"
+                  aria-label=${m.lineWidths}
                 >
                   ${strokeWidths.map(
                     (value, index) => html`<button
@@ -773,7 +773,7 @@ export async function createDrawingEditor(options: {
     } catch (error) {
       if (!closed) {
         busy = false;
-        notice = error instanceof Error ? error.message : 'Could not attach image.';
+        notice = errorMessage(error, 'imageAttachFailed');
         paint();
       }
     }
@@ -1001,11 +1001,12 @@ export async function createDrawingEditor(options: {
     source.stream.getVideoTracks()[0]?.addEventListener(
       'ended',
       () => {
-        notice = 'Screen sharing ended. Cancel and start a new screenshot, or import an image.';
+        notice = msg('captureEnded');
         paint();
       },
       { signal },
     );
+  i18n.subscribe(paint, signal);
   paint();
   return { close };
 }

@@ -5,6 +5,7 @@ import {
   type FeedbackDocument,
   type OutputDetail,
 } from '@ainotation/schema';
+import { uiError } from '../i18n';
 
 /** Start clipboard access synchronously; the payload can finish loading afterward. */
 export async function copyProjectFeedback(
@@ -32,7 +33,7 @@ export async function copyProjectFeedback(
     } else await navigator.clipboard.writeText(await output);
   } catch {
     await output; // Preserve a storage/validation error instead of reporting a clipboard error.
-    throw new Error('Clipboard access failed. Use Export JSON; feedback is still saved.');
+    throw uiError('clipboardFailed');
   }
   return output;
 }
@@ -74,10 +75,7 @@ export function createFeedbackDownloads() {
       ];
       const entries = images.map((image) => {
         const blob = blobs[image.id];
-        if (!blob)
-          throw new Error(
-            'Some images are not available locally yet. Wait for synchronization before exporting.',
-          );
+        if (!blob) throw uiError('exportImagesPending');
         return { name: imageFilename(image), blob };
       });
       entries.unshift({

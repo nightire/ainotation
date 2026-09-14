@@ -216,6 +216,27 @@ it('crops a real high-DPI tab using capture pixels and preserves host UI plus an
         .getSettings(),
     );
     expect(await page.evaluate(() => devicePixelRatio)).toBe(2);
+    const shell = page.locator('ainotation-inspector-shell');
+    await shell.evaluate((element) =>
+      element.dispatchEvent(
+        new CustomEvent('ainotation-action', { detail: { type: 'set-locale', value: 'ja' } }),
+      ),
+    );
+    await expect.poll(() => editor.getAttribute('lang')).toBe('ja');
+    expect(
+      await page.evaluate(() =>
+        (window as Window & { cropCapture?: MediaStream })
+          .cropCapture!.getTracks()
+          .every((track) => track.readyState === 'live'),
+      ),
+    ).toBe(true);
+    expect(await editor.locator('[data-crop-area]').count()).toBe(1);
+    expect(await editor.locator('[data-shape]').count()).toBe(1);
+    await shell.evaluate((element) =>
+      element.dispatchEvent(
+        new CustomEvent('ainotation-action', { detail: { type: 'set-locale', value: 'en' } }),
+      ),
+    );
     await editor.getByRole('button', { name: 'Capture and attach', exact: true }).click();
     const preview = markers.getByRole('img', { name: 'Attached image 1' });
     await expect

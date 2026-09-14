@@ -1,4 +1,5 @@
 import type { SelectionBox } from './drawing-geometry';
+import { uiError } from '../i18n';
 
 export type ImageCrop = { x: number; y: number; width: number; height: number };
 
@@ -15,8 +16,7 @@ export function intersectCrop(crop: SelectionBox, bounds: SelectionBox): Selecti
 /** Store normalized viewport/image coordinates, independently of capture resolution. */
 export function normalizedCrop(crop: SelectionBox, bounds: SelectionBox): ImageCrop {
   const clipped = intersectCrop(crop, bounds);
-  if (!clipped)
-    throw new Error('The crop is outside the visible area. Move it back into view or clear it.');
+  if (!clipped) throw uiError('cropOutside');
   return {
     x: (clipped.left - bounds.left) / (bounds.right - bounds.left),
     y: (clipped.top - bounds.top) / (bounds.bottom - bounds.top),
@@ -33,13 +33,13 @@ export function cropPixels(crop: ImageCrop, width: number, height: number): Imag
     width <= 0 ||
     height <= 0
   )
-    throw new Error('Invalid crop dimensions.');
+    throw uiError('cropInvalid');
   const snap = (value: number) =>
     Math.abs(value - Math.round(value)) < 1e-7 ? Math.round(value) : value;
   const left = Math.max(0, Math.floor(snap(crop.x * width))),
     top = Math.max(0, Math.floor(snap(crop.y * height)));
   const right = Math.min(width, Math.ceil(snap((crop.x + crop.width) * width))),
     bottom = Math.min(height, Math.ceil(snap((crop.y + crop.height) * height)));
-  if (right <= left || bottom <= top) throw new Error('The crop is outside the image.');
+  if (right <= left || bottom <= top) throw uiError('cropOutsideImage');
   return { x: left, y: top, width: right - left, height: bottom - top };
 }

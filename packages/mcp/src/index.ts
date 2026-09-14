@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 import {
   AnnotationContentSchema,
   feedbackExport,
@@ -99,7 +100,8 @@ export function createMcpServer(
     backendFor(
       'project' in input ? ProjectSelectorSchema.optional().parse(input.project) : undefined,
     );
-  const server = new McpServer({ name: 'ainotation', version: '0.0.0' });
+  const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
+  const server = new McpServer({ name: 'ainotation', version });
   server.registerTool(
     'ainotation_get_schema',
     {

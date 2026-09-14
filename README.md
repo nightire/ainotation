@@ -1,5 +1,31 @@
 # Ainotation
 
+Current prerelease: **1.0.0-beta.0** (`beta` npm tag).
+
+```sh
+pnpm add -D @ainotation/vite@beta
+```
+
+```ts
+import { defineConfig } from 'vite';
+import { ainotation } from '@ainotation/vite';
+
+export default defineConfig({ plugins: [ainotation({ name: 'my-app' })] });
+```
+
+MCP clients can run `npx --yes @ainotation/mcp@beta connect` in the workspace.
+The public packages are `@ainotation/vite`, `@ainotation/sdk`,
+`@ainotation/mcp` and `@ainotation/schema`. See [RELEASING.md](./RELEASING.md)
+for the automated Changesets and GitHub Actions release process.
+
+**License:** source available under the [Ainotation Development and Non-Commercial
+License](./LICENSE). Internal development and debugging, including commercial
+projects, are free. Commercial distribution, hosted services and production
+integration of Ainotation require separate written authorization from nightire.
+This is not an OSI-approved open-source license. Software built using Ainotation
+that does not contain Ainotation, and user-created feedback/screenshots, are not
+restricted merely because Ainotation was used to create them.
+
 框架无关的页面反馈工具，支持 DOM 单选/多选、持久化标注、实时页面绘图与图片附件，以及按项目隔离的 MCP 交接。多轮对话架构和历史数据保留在内部，当前 UI 和 MCP 不提供回复、会话讨论或处理状态工作流。原生动画检查属于后续里程碑。
 
 ## 工作区
@@ -89,6 +115,22 @@ Inspector 展开时，按住 **Option（macOS）/ Alt（Windows/Linux）** 可�
 Settings 在 toolbar 上方打开，包含 Theme、Output Detail 与 MCP 连接配置；靠近屏幕上沿时向下打开，并适配窄屏。再次点击 Settings、点击外部或按 Escape 可关闭；Escape 优先关闭 Settings，不取消标注草稿。收起 Inspector 也会关闭 Settings，未提交的连接输入在本次挂载期间保留。
 
 **Theme** 在 Light / Dark 之间切换，默认 Light，支持鼠标及键盘 Enter / Space 操作。主题覆盖 trigger、toolbar、Settings、页面 marker 和反馈 popover，包括表单与文字引用；只改变 Ainotation 自身的界面。偏好按项目保存，重新挂载和刷新后恢复；切换时保留标注、草稿和原始捕获数据。Storybook 提供 **Inspector/Shell → Dark** 与 **Annotations/Markers → Dark Text Selection** 预览。
+
+**Language / 语言** 提供简体中文（`zh-Hans`）、繁體中文（`zh-Hant`）、English（`en`）、日本語（`ja`）、한국어（`ko`）。首次使用按浏览器语言偏好匹配，无法匹配时使用英文；用户手动选择后按项目保存，刷新和重新挂载后恢复。简繁体优先识别书写体系，再匹配地区。切换会更新工具栏、Settings、marker 编辑器、绘图工具、tooltip、无障碍标签和已显示的类型化错误提示，并保留草稿、图片和撤销历史。
+
+国际化采用 `packages/sdk/src/i18n/` 内的 TypeScript 字典及实例级语言状态，不新增运行时依赖。五份字典共用类型，动态文案参数在编译时检查，使用原生 `Intl.Locale` 匹配语言。工具 UI 设置自己的 `lang`，宿主页面语言、用户原文、JSON 字段和 MCP 标识保持原样；Markdown 导出的结构性文案继续使用英文，快捷键也保持一致。
+
+配色以 [Happy Hues 5（Light）](https://www.happyhues.co/palettes/5) 和 [Happy Hues 10（Dark）](https://www.happyhues.co/palettes/10) 为基础，由 `packages/sdk/src/ui/theme.ts` 统一管理语义变量：
+
+| 用途              | Light                      | Dark                       |
+| ----------------- | -------------------------- | -------------------------- |
+| 界面表面          | 浅薄荷 `#f2f7f5`           | 墨绿 `#004643`             |
+| 编辑器底色        | `#e2ece7`                  | `#001e1d`                  |
+| 主文字 / 次级文字 | `#00473e` / `#475d5b`      | `#fffffe` / `#abd1c6`      |
+| 主操作 / 按钮文字 | 金色 `#faae2b` / `#00473e` | 暖金 `#f9bc60` / `#001e1d` |
+| 危险操作          | 深珊瑚红 `#b8352c`         | 浅珊瑚红 `#ffa19a`         |
+
+hover、选中、焦点、成功状态、引用区域、tooltip、选取框和绘图辅助线使用独立变量，确保明暗模式下的可辨识性。绘图色板表示实际笔迹颜色，不随界面主题改写。主题检查覆盖普通文字和主按钮的 4.5:1 对比度，以及焦点和输入边界的 3:1 对比度。
 
 **Output Detail** 控制复制的 Markdown，默认 **Standard**。点击当前级别可按 Compact → Standard → Detailed → Everything → Compact 循环切换，右侧四个圆点标示当前档位；键盘 Enter / Space 同样可切换。偏好按项目保存在 IndexedDB，刷新和重新挂载后恢复。四档使用同一份标注快照，JSON 导出与 MCP 始终保留完整上下文。
 

@@ -1,3 +1,5 @@
+import { uiError } from '../i18n';
+
 const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
   for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
   return value >>> 0;
@@ -13,7 +15,7 @@ export async function imageArchive(entries: { name: string; blob: Blob }[]): Pro
       22,
     ) > 0xffffffff
   )
-    throw new Error('This export exceeds the ZIP size limit. Download images separately.');
+    throw uiError('zipLimit');
   const files: BlobPart[] = [];
   const central: Uint8Array<ArrayBuffer>[] = [];
   let offset = 0;

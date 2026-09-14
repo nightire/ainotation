@@ -1,11 +1,23 @@
 {
   "name": "@ainotation/sdk",
-  "version": "0.0.0",
-  "private": true,
+  "version": "1.0.0-beta.0",
+  "description": "Framework-independent DOM feedback, live drawing and screenshot annotations",
+  "homepage": "https://github.com/nightire/ainotation#readme",
+  "bugs": {
+    "url": "https://github.com/nightire/ainotation/issues"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nightire/ainotation.git",
+    "directory": "packages/sdk"
+  },
   "files": [
-    "dist"
+    "dist",
+    "THIRD_PARTY_NOTICES"
   ],
   "type": "module",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
       "development": "./src/index.ts",
@@ -18,7 +30,21 @@
       "import": "./dist/ui.mjs"
     }
   },
+  "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs"
+      },
+      "./ui": {
+        "types": "./dist/ui.d.mts",
+        "import": "./dist/ui.mjs"
+      }
+    },
+    "access": "public"
+  },
   "scripts": {
+    "prepack": "node ../../scripts/prepare-package.mjs",
     "build": "vp pack",
     "typecheck": "tsc --noEmit",
     "test": "vp test run"

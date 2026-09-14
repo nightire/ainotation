@@ -5,6 +5,7 @@ import {
   type FeedbackImage,
 } from '@ainotation/schema';
 import { cropPixels, type ImageCrop } from './crop';
+import { uiError } from '../i18n';
 
 export async function imageDigest(blob: Blob): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))]
@@ -14,15 +15,13 @@ export async function imageDigest(blob: Blob): Promise<string> {
 
 function validDimensions(width: number, height: number) {
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0)
-    throw new Error(
-      `Image frame has invalid dimensions (${width} × ${height}). Try capturing again.`,
-    );
+    throw uiError('invalidDimensions', width, height);
 }
 
 export function checkImageSize(width: number, height: number) {
   validDimensions(width, height);
   if (width > 16384 || height > 16384 || width * height > MAX_IMAGE_PIXELS)
-    throw new Error(`Image is too large (${width} × ${height}). Use an image up to 16 megapixels.`);
+    throw uiError('imageTooLarge', width, height);
 }
 
 export function fittedImageSize(width: number, height: number) {
@@ -53,7 +52,7 @@ export function imageCanvas(
   canvas.height = size.height;
   try {
     const context = canvas.getContext('2d');
-    if (!context) throw new Error('Image drawing is unavailable.');
+    if (!context) throw uiError('drawingUnavailable');
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
     if (region)
@@ -89,19 +88,13 @@ export async function canvasBlob(canvas: HTMLCanvasElement, signal?: AbortSignal
       signal?.throwIfAborted();
       const blob = await new Promise<Blob>((resolve, reject) =>
         output.toBlob((blob) => {
-          if (!blob)
-            reject(
-              new Error(
-                `Could not encode the image (${output.width} × ${output.height}). Try capturing again.`,
-              ),
-            );
+          if (!blob) reject(uiError('encodeFailed', output.width, output.height));
           else resolve(blob);
         }, 'image/png'),
       );
       signal?.throwIfAborted();
       if (blob.size <= MAX_IMAGE_BYTES) return blob;
-      if (output.width === 1 && output.height === 1)
-        throw new Error('Could not fit the screenshot within the 8 MiB attachment limit.');
+      if (output.width === 1 && output.height === 1) throw uiError('imageFitFailed');
       const ratio = Math.min(0.85, Math.sqrt(MAX_IMAGE_BYTES / blob.size) * 0.9);
       const width = Math.max(1, Math.floor(output.width * ratio));
       const height = Math.max(1, Math.floor(output.height * ratio));
@@ -121,9 +114,8 @@ export async function canvasBlob(canvas: HTMLCanvasElement, signal?: AbortSignal
 }
 
 export async function decodeImage(blob: Blob): Promise<ImageBitmap> {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type))
-    throw new Error('Choose a PNG, JPEG or WebP image.');
-  if (blob.size > MAX_IMAGE_BYTES) throw new Error('Image exceeds 8 MB. Use a smaller image.');
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) throw uiError('imageType');
+  if (blob.size > MAX_IMAGE_BYTES) throw uiError('imageBytesLimit');
   const bitmap = await createImageBitmap(blob);
   try {
     checkImageSize(bitmap.width, bitmap.height);
@@ -160,5 +152,5 @@ export async function verifyImage(blob: Blob, image: FeedbackImage): Promise<voi
     blob.size !== image.size ||
     (await imageDigest(blob)) !== image.sha256
   )
-    throw new Error('Image attachment failed validation.');
+    throw uiError('imageValidation');
 }

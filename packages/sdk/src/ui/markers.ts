@@ -7,6 +7,7 @@ import type { InspectorAction, InspectorViewState } from '../core/types';
 import { themeStyles } from './theme';
 import { toolNode } from '../core/dom';
 import { getViewport } from './position';
+import { messages } from '../i18n';
 
 type Rect = TargetSnapshot['rect'];
 type Options = {
@@ -51,7 +52,7 @@ const styles = css`
   }
   button:focus-visible,
   textarea:focus-visible {
-    outline: 2px solid var(--ain-accent);
+    outline: 2px solid var(--ain-focus);
     outline-offset: 2px;
   }
   .primary {
@@ -78,7 +79,7 @@ const styles = css`
     max-height: 24px;
     padding: 0;
     margin: 0;
-    border: 1px solid var(--ain-accent);
+    border: 1px solid var(--ain-on-accent);
     border-radius: 50%;
     background: var(--ain-accent);
     color: var(--ain-on-accent);
@@ -138,7 +139,7 @@ const styles = css`
     display: block;
     margin-top: 4px;
     padding: 6px 8px;
-    border-left: 2px solid var(--ain-accent);
+    border-left: 2px solid var(--ain-quote-border);
     background: var(--ain-quote);
     font:
       12px/1.5 system-ui,
@@ -182,7 +183,7 @@ const styles = css`
     border-color: var(--ain-error);
   }
   .actions .danger:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--ain-error) 12%, var(--ain-surface));
+    background: var(--ain-error-surface);
   }
   .actions svg {
     width: 16px;
@@ -307,6 +308,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
 
   function position() {
     if (!view || !visible || destroyed) return;
+    const m = messages(view.locale);
     const roots = new Set<Document | ShadowRoot>([document]);
     const elements = new Set<Element>();
     const rectangles = new Map<TargetSnapshot, Rect | null>();
@@ -407,10 +409,10 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
         button.style.left = `${anchor.x}px`;
         button.style.top = `${anchor.y}px`;
         button.title = anchor.unavailable
-          ? 'Target unavailable'
+          ? m.targetUnavailable
           : id
-            ? 'Edit feedback'
-            : 'New annotation';
+            ? m.editFeedback
+            : m.newAnnotation;
       }
       if (button.hidden && shadow.activeElement === button) button.blur();
     }
@@ -472,6 +474,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     update(next, nextVisible) {
       if (destroyed) return;
       host.dataset.theme = next.theme;
+      host.lang = next.locale;
+      const m = messages(next.locale);
       const focused = shadow.activeElement as HTMLElement | null;
       const hadEditorFocus = Boolean(focused?.closest('.popover'));
       const focusedId = focused?.dataset.annotationId;
@@ -507,7 +511,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                   class="marker"
                   type="button"
                   data-annotation-id=${annotation.id}
-                  aria-label=${`Edit annotation ${index + 1}`}
+                  aria-label=${m.editAnnotation(index + 1)}
                   @click=${() => onAction({ type: 'edit', id: annotation.id })}
                 >
                   <span class="number">${index + 1}</span>
@@ -523,7 +527,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                     <button
                       class="marker"
                       type="button"
-                      aria-label="New annotation"
+                      aria-label=${m.newAnnotation}
                       @click=${() => shadow.querySelector('textarea')?.focus({ preventScroll: true })}
                     >
                       ${createElement(Plus, { 'aria-hidden': 'true', focusable: 'false' })}
@@ -537,7 +541,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                     <section
                       class="popover"
                       role="dialog"
-                      aria-label=${next.editingId ? 'Edit feedback' : 'New feedback'}
+                      aria-label=${next.editingId ? m.editFeedback : m.newFeedback}
                       @paste=${(event: ClipboardEvent) => {
                         const file = [...(event.clipboardData?.files ?? [])].find((file) =>
                           file.type.startsWith('image/'),
@@ -570,18 +574,18 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         }
                       }}
                     >
-                      <ul class="target-list" aria-label="Selected elements">
+                      <ul class="target-list" aria-label=${m.selectedElements}>
                         ${repeat(
                           editorTargets,
                           (target) => target.id,
                           (target) =>
                             html`<li title=${target.text}>
-                              ${target.selector}${target.textSelection ? html`<q class="text-quote" aria-label="Selected text">${target.textSelection.exact}${target.textSelection.truncated ? '…' : ''}</q>` : nothing}
+                              ${target.selector}${target.textSelection ? html`<q class="text-quote" aria-label=${m.selectedText}>${target.textSelection.exact}${target.textSelection.truncated ? '…' : ''}</q>` : nothing}
                             </li>`,
                         )}
                       </ul>
                       <textarea
-                        aria-label="Feedback content"
+                        aria-label=${m.feedbackContent}
                         aria-keyshortcuts="Meta+Enter"
                         rows="3"
                         maxlength="10000"
@@ -606,23 +610,23 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         }}
                         @input=${(event: Event) => onAction({ type: 'draft', value: (event.currentTarget as HTMLTextAreaElement).value })}
                       ></textarea>
-                      <div class="images" aria-label="Attached images">
+                      <div class="images" aria-label=${m.attachedImages}>
                         ${next.images.map(
                           (image, index) => html`<div class="image">
                             <button
                               class="image-preview"
                               type="button"
-                              aria-label=${`Edit image ${index + 1}`}
+                              aria-label=${m.editImage(index + 1)}
                               ?disabled=${!next.imageUrls[image.id]}
                               @click=${() => onAction({ type: 'edit-image', id: image.id })}
                             >
-                              ${next.imageUrls[image.id] ? html`<img src=${next.imageUrls[image.id]} alt=${`Attached image ${index + 1}`} />` : html`Image ${index + 1}`}
+                              ${next.imageUrls[image.id] ? html`<img src=${next.imageUrls[image.id]} alt=${m.attachedImage(index + 1)} />` : m.image(index + 1)}
                             </button>
                             <button
                               class="image-action image-download"
                               type="button"
-                              aria-label=${`Download image ${index + 1}`}
-                              title="Download image"
+                              aria-label=${m.downloadImageNumber(index + 1)}
+                              title=${m.downloadImage}
                               ?disabled=${!next.imageUrls[image.id]}
                               @click=${() => onAction({ type: 'download-image', id: image.id })}
                             >
@@ -631,8 +635,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                             <button
                               class="image-action image-remove"
                               type="button"
-                              aria-label=${`Remove image ${index + 1}`}
-                              title="Remove image"
+                              aria-label=${m.removeImageNumber(index + 1)}
+                              title=${m.removeImage}
                               @click=${() => onAction({ type: 'remove-image', id: image.id })}
                             >
                               ${createElement(Trash2, { 'aria-hidden': 'true' })}
@@ -643,8 +647,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                       <div class="actions">
                         <button
                           type="button"
-                          aria-label="Screenshot"
-                          title="Draw on this page and capture a screenshot"
+                          aria-label=${m.screenshot}
+                          title=${m.screenshotHint}
                           ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
                           @click=${() => onAction({ type: 'screenshot' })}
                         >
@@ -652,8 +656,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         </button>
                         <button
                           type="button"
-                          aria-label="Choose image"
-                          title="Choose image"
+                          aria-label=${m.chooseImage}
+                          title=${m.chooseImage}
                           ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
                           @click=${() => shadow.querySelector<HTMLInputElement>('input[type=file]')?.click()}
                         >
@@ -673,8 +677,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         <div class="actions-end">
                           <button
                             type="button"
-                            aria-label="Cancel"
-                            title="Cancel"
+                            aria-label=${m.cancel}
+                            title=${m.cancel}
                             @click=${() => onAction({ type: 'cancel-edit' })}
                           >
                             ${createElement(X, { 'aria-hidden': 'true', focusable: 'false' })}
@@ -682,8 +686,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           <button
                             class="primary"
                             type="button"
-                            aria-label=${next.editingId ? 'Save' : 'Add'}
-                            title=${`${next.editingId ? 'Save' : 'Add'} (Command/Super + Enter)`}
+                            aria-label=${next.editingId ? m.save : m.add}
+                            title=${m.shortcut(next.editingId ? m.save : m.add, 'Command/Super + Enter')}
                             aria-keyshortcuts="Meta+Enter"
                             ?disabled=${!next.draft.trim() || next.saving || next.storage === 'loading'}
                             @click=${() => onAction({ type: 'save' })}
@@ -695,8 +699,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                               ? html`<button
                                   class="danger"
                                   type="button"
-                                  aria-label="Delete"
-                                  title="Delete"
+                                  aria-label=${m.delete}
+                                  title=${m.delete}
                                   ?disabled=${next.saving}
                                   @click=${() => onAction({ type: 'delete', id: next.editingId! })}
                                 >
@@ -706,7 +710,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           }
                         </div>
                       </div>
-                      <p class="import-hint">Paste or drop an image here</p>
+                      <p class="import-hint">${m.pasteImage}</p>
                       ${next.message ? html`<p class="message" role="status">${next.message}</p>` : nothing}
                     </section>
                   `

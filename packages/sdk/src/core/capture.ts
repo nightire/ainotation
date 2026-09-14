@@ -1,5 +1,6 @@
 import { canvasBlob, imageCanvas } from './images';
 import type { ImageCrop } from './crop';
+import { uiError, UiError, msg } from '../i18n';
 
 function captureTask<T>(
   task: Promise<T>,
@@ -11,7 +12,7 @@ function captureTask<T>(
     let settled = false;
     const abort = () => {
       settled = true;
-      reject(new Error('Screen capture stopped or timed out.'));
+      reject(uiError('captureTimeout'));
     };
     if (bound.aborted) abort();
     else bound.addEventListener('abort', abort, { once: true });
@@ -38,9 +39,7 @@ function captureTask<T>(
 /** Call synchronously inside the screenshot action to retain user activation. */
 export function requestCapture(signal: AbortSignal): Promise<MediaStream> {
   if (!navigator.mediaDevices?.getDisplayMedia)
-    return Promise.reject(
-      new Error('Screen capture is unavailable. Paste, drop or choose an image instead.'),
-    );
+    return Promise.reject(uiError('captureUnavailable'));
   const captureOptions = {
     audio: false,
     video: true,
@@ -94,7 +93,7 @@ export async function createScreenCapture(stream: MediaStream, signal: AbortSign
       };
       const abort = () => {
         cleanup();
-        reject(new Error('Capture stopped or no new frame arrived.'));
+        reject(uiError('frameWaiting'));
       };
       const done = () => {
         cleanup();
@@ -110,12 +109,9 @@ export async function createScreenCapture(stream: MediaStream, signal: AbortSign
   return {
     stop,
     async snapshot(crop?: ImageCrop) {
-      if (stream.getVideoTracks()[0]?.readyState !== 'live')
-        throw new Error('Screen sharing has ended.');
+      if (stream.getVideoTracks()[0]?.readyState !== 'live') throw uiError('captureStopped');
       if (crop && stream.getVideoTracks()[0]?.getSettings().displaySurface !== 'browser')
-        throw new Error(
-          'Choose the current browser tab for live cropping. For a window or screen, capture the full image and crop its attachment.',
-        );
+        throw uiError('cropNeedsTab');
       // Wait beyond the frame already queued when editor controls were hidden.
       await nextFrame();
       signal.throwIfAborted();
@@ -135,7 +131,7 @@ export async function createScreenCapture(stream: MediaStream, signal: AbortSign
               video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
             )
               return null;
-            throw new Error('Could not read the capture frame. Try capturing again.', {
+            throw new UiError(msg('frameFailed'), {
               cause: error,
             });
           })

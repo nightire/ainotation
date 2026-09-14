@@ -18,6 +18,16 @@ import { copyProjectFeedback, createFeedbackDownloads } from './core/handoff';
 import { developmentBridge, type DevelopmentConnection } from './core/development';
 import { requestCapture } from './core/capture';
 import { describeImage } from './core/images';
+import { themeStyles } from './ui/theme';
+import {
+  createI18n,
+  detectLocale,
+  formatMessage,
+  errorMessage,
+  msg,
+  uiError,
+  type UiMessage,
+} from './i18n';
 
 export async function createRuntime(
   shell: InspectorShell,
@@ -25,6 +35,8 @@ export async function createRuntime(
   signal: AbortSignal,
 ) {
   const view = emptyViewState();
+  const i18n = createI18n(detectLocale());
+  view.locale = i18n.locale;
   let disposed = false;
   let record: DraftRecord | null = null;
   let pageUrl = location.href;
@@ -50,10 +62,14 @@ export async function createRuntime(
   let storageReady = false;
   let navigation: ReturnType<typeof setInterval> | undefined;
   let connection: McpConnection | null = null;
+  let applySelectionTheme: (theme: string) => void = () => {};
   let sync: ReturnType<typeof createSyncClient> | undefined;
   const credentialsKey = `ainotation:mcp:${project}`;
   const render = () => {
     if (!disposed && !signal.aborted) {
+      i18n.setLocale(view.locale);
+      if (view.messageDescriptor) view.message = formatMessage(view.locale, view.messageDescriptor);
+      applySelectionTheme(view.theme);
       for (const [id, url] of imageUrls) {
         if (!view.images.some((image) => image.id === id)) {
           URL.revokeObjectURL(url);
@@ -73,21 +89,20 @@ export async function createRuntime(
       markerLayer?.update(shell.view, !drawing && shell.expanded && view.storage !== 'loading');
     }
   };
-  const message = (text: string) => {
-    view.message = text;
+  const message = (text: string | UiMessage) => {
+    if (typeof text === 'string') delete view.messageDescriptor;
+    else view.messageDescriptor = text;
+    view.message = formatMessage(view.locale, text);
     render();
   };
-  const report = (error: unknown) =>
-    message(
-      error instanceof Error ? error.message : 'The operation failed. Feedback was not cleared.',
-    );
+  const report = (error: unknown) => message(errorMessage(error));
   render();
   const preferences = bindPreferences(shell, project, view, signal, render, message);
 
   const store = await createDraftStore({
     onUnavailable() {
       view.storage = 'unavailable';
-      message('Local storage unavailable. Export feedback before reloading.');
+      message(msg('storageUnavailable'));
     },
     onExternalChange() {
       const token = pageGeneration;
@@ -116,6 +131,7 @@ export async function createRuntime(
   }
   const selection = createSelection({
     visible: shell.expanded,
+    appearance: { theme: view.theme, cssText: themeStyles.cssText },
     onChange() {
       if (disposed) return;
       if (reconcilePage()) return;
@@ -144,6 +160,7 @@ export async function createRuntime(
       view.marker = anchor;
       view.editorOpen = true;
       view.message = '';
+      delete view.messageDescriptor;
       render();
       void saveDraft().catch(report);
     },
@@ -169,6 +186,7 @@ export async function createRuntime(
       void handle({ type: 'cancel-edit' }).catch(report);
     },
   });
+  applySelectionTheme = (theme) => selection.setTheme(theme);
   markerLayer = createMarkerLayer({
     onAction: (action) => {
       void handle(action).catch(report);
@@ -213,8 +231,7 @@ export async function createRuntime(
     if (!view.editorOpen && !view.draft && next.draft.text && !next.draft.editorOpen) {
       view.draft = next.draft.text;
       view.images = structuredClone(next.draft.images ?? []);
-      view.message =
-        'An edited annotation was deleted remotely. Its text is kept for a new selection.';
+      view.messageDescriptor = msg('remoteDeleted');
     }
     if (
       view.editingId &&
@@ -225,7 +242,7 @@ export async function createRuntime(
       view.editorOpen = false;
       view.marker = null;
       selection.clear();
-      view.message = 'The annotation was deleted. Unsaved text is kept for a new selection.';
+      view.messageDescriptor = msg('annotationDeleted');
     }
     updateAvailability();
     render();
@@ -338,7 +355,7 @@ export async function createRuntime(
     }
     view.connection = 'offline';
     view.syncing = false;
-    message('Local only');
+    message(msg('localOnly'));
   }
   async function connect(value: McpConnection) {
     connection = normalizeConnection(value);
@@ -352,20 +369,24 @@ export async function createRuntime(
   }
   const downloads = createFeedbackDownloads();
   async function copy() {
-    if (reconcilePage()) throw new Error('Feedback for this page is still loading.');
-    if (!record) throw new Error('Feedback is still loading.');
+    if (reconcilePage()) throw uiError('pageLoading');
+    if (!record) throw uiError('feedbackLoading');
     const output = await copyProjectFeedback(
       store.readProjectDocuments(project),
       record.document,
       view.outputDetail,
       () => !disposed && !signal.aborted,
     );
-    message('Feedback copied');
+    message(msg('copied'));
     return output;
   }
   async function handle(action: InspectorAction) {
     if (disposed || signal.aborted) return;
-    if (action.type === 'set-theme' || action.type === 'set-output-detail') {
+    if (
+      action.type === 'set-theme' ||
+      action.type === 'set-output-detail' ||
+      action.type === 'set-locale'
+    ) {
       await preferences.update(action);
       return;
     }
@@ -378,7 +399,7 @@ export async function createRuntime(
       return;
     }
     if (reconcilePage() || view.storage === 'loading') {
-      message('Loading feedback for this page');
+      message(msg('pageLoading'));
       return;
     }
     if (action.type === 'connect') {
@@ -398,7 +419,7 @@ export async function createRuntime(
       await saveDraft();
       return;
     }
-    if (!record) throw new Error('Feedback is still loading.');
+    if (!record) throw uiError('feedbackLoading');
     if (
       action.type === 'screenshot' ||
       action.type === 'import-image' ||
@@ -406,7 +427,7 @@ export async function createRuntime(
     ) {
       if (drawing || saving || !view.editorOpen) return;
       if (action.type !== 'edit-image' && view.images.length >= MAX_ANNOTATION_IMAGES)
-        throw new Error('Up to 8 images can be attached to one annotation.');
+        throw uiError('imageLimit');
       const lifetime = new AbortController();
       drawing = lifetime;
       const drawingSignal = AbortSignal.any([signal, lifetime.signal]);
@@ -440,11 +461,11 @@ export async function createRuntime(
             : action.type === 'edit-image'
               ? record.images?.[action.id]
               : undefined;
-        if (!stream && !blob)
-          throw new Error('Image is not available locally yet. Wait for synchronization.');
+        if (!stream && !blob) throw uiError('imagePending');
         const { createDrawingEditor } = await import('./ui/drawing');
         drawingSignal.throwIfAborted();
         await createDrawingEditor({
+          i18n,
           source: stream ? { stream } : { blob: blob! },
           theme: view.theme,
           signal: drawingSignal,
@@ -455,7 +476,7 @@ export async function createRuntime(
             );
             drawingSignal.throwIfAborted();
             if (reconcilePage() || page !== pageGeneration || version !== editorVersion)
-              throw new Error('The annotation changed while drawing.');
+              throw uiError('changedWhileDrawing');
             const previous = view.images;
             view.images =
               action.type === 'edit-image'
@@ -469,7 +490,7 @@ export async function createRuntime(
               });
               if (page === pageGeneration && !disposed) {
                 accept(next);
-                view.message = 'Image attached. Save the feedback to share it.';
+                view.messageDescriptor = msg('imageAttached');
               }
             } catch (error) {
               if (page === pageGeneration && version === editorVersion && !disposed)
@@ -498,7 +519,7 @@ export async function createRuntime(
     }
     if (action.type === 'download-image') {
       const blob = record.images?.[action.id];
-      if (!blob) throw new Error('Image is not available locally yet.');
+      if (!blob) throw uiError('imagePending');
       downloads.download(blob, `${action.id}.png`);
       return;
     }
@@ -510,7 +531,7 @@ export async function createRuntime(
       const images = record.document.annotations.flatMap((annotation) => annotation.images ?? []);
       if (images.length) await downloads.exportImages(record.document, record.images ?? {});
       else downloads.exportJson(record.document);
-      message('Feedback exported');
+      message(msg('exported'));
       return;
     }
     if (action.type === 'cancel-edit') {
@@ -532,7 +553,7 @@ export async function createRuntime(
           if (version === editorVersion) resetEditor();
           accept(next);
           sync?.request();
-          message('All annotations on this page cleared');
+          message(msg('cleared'));
         }
       } finally {
         saving = false;
@@ -557,9 +578,7 @@ export async function createRuntime(
         if (editingId && !existing) {
           view.editingId = null;
           await saveDraft();
-          message(
-            'The original feedback was deleted. Your draft is kept as a new annotation draft.',
-          );
+          message(msg('originalDeleted'));
           return;
         }
         const now = new Date().toISOString();
@@ -586,7 +605,7 @@ export async function createRuntime(
           resetEditor();
           await saveDraft();
         }
-        if (page === pageGeneration) message('Feedback saved');
+        if (page === pageGeneration) message(msg('saved'));
       } finally {
         saving = false;
         view.saving = false;
@@ -596,10 +615,11 @@ export async function createRuntime(
     }
     if (!('id' in action)) return;
     const annotation = record.document.annotations.find((item) => item.id === action.id);
-    if (!annotation) throw new Error('This feedback no longer exists.');
+    if (!annotation) throw uiError('missingAnnotation');
     if (action.type === 'edit') {
       editorVersion++;
       view.message = '';
+      delete view.messageDescriptor;
       view.editingId = annotation.id;
       view.draft = annotation.comment;
       view.images = structuredClone(annotation.images ?? []);
@@ -679,7 +699,7 @@ export async function createRuntime(
     }
     if (connection) view.endpoint = connection.endpoint;
   } catch {
-    message('MCP settings could not be restored. Connect manually.');
+    message(msg('connectionRestoreFailed'));
   }
   try {
     await preferences.ready;

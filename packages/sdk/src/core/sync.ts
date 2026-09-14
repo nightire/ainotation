@@ -2,6 +2,7 @@ import { SyncResponseSchema } from '@ainotation/schema';
 import type { DraftRecord } from './storage';
 import type { SyncResponse } from '@ainotation/schema';
 import { syncImages } from './image-sync';
+import { uiError, msg, type UiMessage } from '../i18n';
 
 export interface McpConnection {
   endpoint: string;
@@ -30,14 +31,14 @@ export function normalizeConnection(connection: McpConnection): McpConnection {
     url.hash ||
     url.pathname !== '/'
   ) {
-    throw new Error('MCP endpoint must be a loopback HTTP(S) origin.');
+    throw uiError('invalidEndpoint');
   }
   if (
     !connection.token.trim() ||
     /\s/.test(connection.token.trim()) ||
     connection.token.length > 512
   )
-    throw new Error('Enter a valid pairing token.');
+    throw uiError('invalidToken');
   return {
     endpoint: connection.transport === 'same-origin' ? url.href.replace(/\/$/, '') : url.origin,
     token: connection.token.trim(),
@@ -50,7 +51,7 @@ export function createSyncClient(options: {
   sessionId: string;
   read: () => Promise<DraftRecord>;
   apply: (response: SyncResponse, images: Record<string, Blob>) => Promise<void>;
-  onState: (state: 'connecting' | 'connected' | 'error', message: string) => void;
+  onState: (state: 'connecting' | 'connected' | 'error', message: UiMessage) => void;
   onSync: (syncing: boolean) => void;
 }) {
   const controller = new AbortController();
@@ -127,7 +128,7 @@ export function createSyncClient(options: {
     if (!stopped)
       void sync().catch(() => {
         if (stopped) return;
-        options.onState('error', 'MCP sync failed; local changes are retained for retry.');
+        options.onState('error', msg('syncFailed'));
         streaming?.abort();
       });
   };
@@ -143,7 +144,7 @@ export function createSyncClient(options: {
     });
   void (async () => {
     while (!stopped) {
-      options.onState('connecting', 'Connecting to MCP server');
+      options.onState('connecting', msg('syncConnecting'));
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       let watchdog: ReturnType<typeof setTimeout> | undefined;
       const armWatchdog = (duration: number) => {
@@ -173,7 +174,7 @@ export function createSyncClient(options: {
         }
         reader = response.body.getReader();
         armWatchdog(35000);
-        options.onState('connected', 'MCP server connected');
+        options.onState('connected', msg('syncConnected'));
         const decoder = new TextDecoder();
         let buffer = '';
         while (!stopped) {
@@ -191,8 +192,7 @@ export function createSyncClient(options: {
         }
       } catch {
         uploaded.clear();
-        if (!stopped)
-          options.onState('error', 'MCP unavailable. Local feedback is retained; retrying.');
+        if (!stopped) options.onState('error', msg('syncUnavailable'));
       } finally {
         clearTimeout(watchdog);
         await reader?.cancel().catch(() => {});

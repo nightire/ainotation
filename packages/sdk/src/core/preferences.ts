@@ -1,6 +1,7 @@
 import { OutputDetailSchema, type OutputDetail } from '@ainotation/schema';
 import type { InspectorPosition, InspectorTheme } from './types';
 import { createPreference } from './preference-store';
+import { detectLocale, isLocale, type Locale } from '../i18n';
 
 function parsePosition(value: unknown): InspectorPosition | undefined {
   if (
@@ -47,6 +48,21 @@ const position = createPreference<InspectorPosition>({
     decode: JSON.parse,
   },
 });
+const locale = createPreference<Locale>({
+  key: (project) => ['locale', project],
+  parse: (value) => (isLocale(value) ? value : undefined),
+  cache: {
+    key: (project) => `ainotation:locale:${project}`,
+    encode: (value) => value,
+    decode: (value) => value,
+  },
+});
+export async function readLocale(project: string): Promise<Locale> {
+  return (await locale.read(project)) ?? detectLocale();
+}
+export function writeLocale(project: string, value: Locale): Promise<void> {
+  return locale.write(project, value);
+}
 
 export async function readOutputDetail(project: string): Promise<OutputDetail> {
   return (await outputDetail.read(project)) ?? 'standard';

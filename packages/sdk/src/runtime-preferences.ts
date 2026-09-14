@@ -8,9 +8,15 @@ import {
   writeOutputDetail,
   readTheme,
   writeTheme,
+  readLocale,
+  writeLocale,
 } from './core/preferences';
+import { isLocale, msg, type UiMessage } from './i18n';
 
-type PreferenceAction = Extract<InspectorAction, { type: 'set-theme' | 'set-output-detail' }>;
+type PreferenceAction = Extract<
+  InspectorAction,
+  { type: 'set-theme' | 'set-output-detail' | 'set-locale' }
+>;
 
 /** Owns preference restoration and lifetime; does not participate in page feedback state. */
 export function bindPreferences(
@@ -19,11 +25,11 @@ export function bindPreferences(
   view: InspectorViewState,
   signal: AbortSignal,
   changed: () => void,
-  report: (message: string) => void,
+  report: (message: string | UiMessage) => void,
 ) {
   let active = true;
   let savedPosition = '';
-  const versions = { theme: 0, detail: 0 };
+  const versions = { theme: 0, detail: 0, locale: 0 };
   const live = () => active && !signal.aborted;
   const persistPosition = () => {
     const position = shell.getPosition();
@@ -44,13 +50,19 @@ export function bindPreferences(
   signal.addEventListener('abort', destroy, { once: true });
   if (signal.aborted) destroy();
 
-  const ready = readInspectorPosition(project).then(async (position) => {
+  const positionReady = readInspectorPosition(project).then(async (position) => {
     if (!position || !live()) return;
     await shell.updateComplete;
     if (!live()) return;
     const existing = shell.getPosition();
     shell.restorePosition(position);
     if (!existing && !savedPosition) savedPosition = JSON.stringify(shell.getPosition()) ?? '';
+  });
+  const localeReady = readLocale(project).then((locale) => {
+    if (live() && versions.locale === 0) {
+      view.locale = locale;
+      changed();
+    }
   });
   void readOutputDetail(project).then((detail) => {
     if (live() && versions.detail === 0) {
@@ -66,18 +78,26 @@ export function bindPreferences(
   });
 
   return {
-    ready,
+    ready: Promise.all([positionReady, localeReady]).then(() => {}),
     destroy,
     async update(action: PreferenceAction) {
       if (!live()) return;
-      if (action.type === 'set-theme') {
+      if (action.type === 'set-locale') {
+        if (!isLocale(action.value)) return;
+        versions.locale++;
+        view.locale = action.value;
+        changed();
+        await writeLocale(project, action.value).catch(() => {
+          if (live()) report(msg('preferencesUnsaved'));
+        });
+      } else if (action.type === 'set-theme') {
         if (action.value !== 'light' && action.value !== 'dark')
           throw new Error('Invalid inspector theme');
         versions.theme++;
         view.theme = action.value;
         changed();
         await writeTheme(project, action.value).catch(() => {
-          if (live()) report('Theme changed for this session; the preference could not be saved.');
+          if (live()) report(msg('preferencesUnsaved'));
         });
       } else {
         const detail = OutputDetailSchema.parse(action.value);
@@ -85,8 +105,7 @@ export function bindPreferences(
         view.outputDetail = detail;
         changed();
         await writeOutputDetail(project, detail).catch(() => {
-          if (live())
-            report('Output detail changed for this session; the preference could not be saved.');
+          if (live()) report(msg('preferencesUnsaved'));
         });
       }
     },

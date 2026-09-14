@@ -228,7 +228,7 @@ describe('in-place annotation markers', () => {
     expect(marker.getBoundingClientRect().width).toBe(24);
     expect(marker.getBoundingClientRect().height).toBe(24);
     expect(center(marker)).toEqual({ x: 120, y: 100 });
-    expect(getComputedStyle(marker).backgroundColor).toBe('rgb(8, 127, 117)');
+    expect(getComputedStyle(marker).backgroundColor).toBe('rgb(250, 174, 43)');
     expect(getComputedStyle(marker).fontSize).toBe('12px');
     expect(getComputedStyle(marker).borderRadius).toBe('50%');
     expect(getComputedStyle(control('.pencil')).display).toBe('none');

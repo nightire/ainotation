@@ -24,7 +24,7 @@ export const drawingStyles = css`
     touch-action: none;
   }
   .import {
-    background: var(--ain-surface-muted, #e5e7eb);
+    background: var(--ain-surface-muted);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -112,11 +112,11 @@ export const drawingStyles = css`
     background: var(--ain-hover);
   }
   button[aria-pressed='true'] {
-    border-color: var(--ain-accent);
-    background: var(--ain-hover);
+    border-color: var(--ain-focus);
+    background: var(--ain-selected);
   }
   button:focus-visible {
-    outline: 2px solid var(--ain-accent);
+    outline: 2px solid var(--ain-focus);
   }
   .stroke-width {
     flex-shrink: 0;
@@ -139,7 +139,7 @@ export const drawingStyles = css`
     background: var(--ain-hover);
   }
   .stroke-width:focus-visible {
-    outline: 2px solid var(--ain-accent);
+    outline: 2px solid var(--ain-focus);
   }
   button:disabled {
     opacity: 0.4;
@@ -153,7 +153,7 @@ export const drawingStyles = css`
     margin: 0 1px;
   }
   .swatch[aria-pressed='true'] {
-    outline: 2px solid var(--ain-accent);
+    outline: 2px solid var(--ain-focus);
     outline-offset: 1px;
   }
   .color-trigger .swatch {
@@ -185,7 +185,7 @@ export const drawingStyles = css`
     font: inherit;
   }
   .width-popover button[aria-selected='true'] {
-    background: var(--ain-hover);
+    background: var(--ain-selected);
   }
   .width-preview {
     display: block;
@@ -194,7 +194,7 @@ export const drawingStyles = css`
     border-radius: 3px;
   }
   .palette [data-highlighted] {
-    outline: 2px solid var(--ain-accent);
+    outline: 2px solid var(--ain-focus);
     outline-offset: 1px;
   }
   .separator {
@@ -230,8 +230,8 @@ export const drawingStyles = css`
     max-width: calc(100vw - 16px);
     padding: 6px 9px;
     border-radius: 5px;
-    background: var(--ain-text);
-    color: var(--ain-surface);
+    background: var(--ain-tooltip);
+    color: var(--ain-on-tooltip);
     font-size: 12px;
     line-height: 1.4;
     text-align: center;

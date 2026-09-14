@@ -5,27 +5,29 @@ import type {
   OutputDetail,
   FeedbackImage,
 } from '@ainotation/schema';
+import type { Locale, UiMessage } from '../i18n';
+import { en } from '../i18n/en';
 
 export const outputDetails: { value: OutputDetail; label: string; description: string }[] = [
   {
     value: 'compact',
-    label: 'Compact',
-    description: 'Short notes with selectors and brief text quotes.',
+    label: en.compact,
+    description: en.compactDescription,
   },
   {
     value: 'standard',
-    label: 'Standard',
-    description: 'Element locations, viewport and selected text.',
+    label: en.standard,
+    description: en.standardDescription,
   },
   {
     value: 'detailed',
-    label: 'Detailed',
-    description: 'Adds classes, bounds, nearby text and captured states.',
+    label: en.detailed,
+    description: en.detailedDescription,
   },
   {
     value: 'forensic',
-    label: 'Everything',
-    description: 'Adds DOM ancestry, styles, accessibility and environment.',
+    label: en.forensic,
+    description: en.forensicDescription,
   },
 ];
 
@@ -48,12 +50,14 @@ export interface InspectorViewState {
   marker: MarkerAnchor | null;
   saving: boolean;
   message: string;
+  messageDescriptor?: UiMessage;
   storage: 'loading' | 'ready' | 'unavailable';
   connection: 'offline' | 'connecting' | 'connected' | 'error';
   endpoint: string;
   syncing: boolean;
   outputDetail: OutputDetail;
   theme: InspectorTheme;
+  locale: Locale;
   managedConnection: boolean;
   projectName: string;
   images: FeedbackImage[];
@@ -67,6 +71,7 @@ export type InspectorAction =
   | { type: 'set-picking'; value: boolean }
   | { type: 'set-output-detail'; value: OutputDetail }
   | { type: 'set-theme'; value: InspectorTheme }
+  | { type: 'set-locale'; value: Locale }
   | { type: 'draft'; value: string }
   | { type: 'edit' | 'delete'; id: string }
   | { type: 'connect'; endpoint: string; token: string }
@@ -93,6 +98,7 @@ export function emptyViewState(): InspectorViewState {
     syncing: false,
     outputDetail: 'standard',
     theme: 'light',
+    locale: 'en',
     managedConnection: false,
     projectName: '',
     images: [],
