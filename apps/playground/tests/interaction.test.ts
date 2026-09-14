@@ -299,6 +299,8 @@ it('opens into selection and supports draggable launcher/panel with mouse, touch
     const touchPosition = await touchShell.boundingBox();
     expect(Math.abs(touchPosition!.x - 40)).toBeLessThan(2);
     expect(Math.abs(touchPosition!.y - 80)).toBeLessThan(2);
+    // Let the native post-drag click sequence settle before a separate tap.
+    await touchPage.waitForTimeout(550);
     await touchLauncher.tap();
     await expect
       .poll(() => touchShell.evaluate((el) => (el as InspectorShell).view.picking))

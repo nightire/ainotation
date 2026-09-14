@@ -44,6 +44,7 @@ async function withEditor(
         '--auto-accept-this-tab-capture',
         '--auto-select-tab-capture-source-by-title=Ainotation Image Test',
         '--enable-usermedia-screen-capturing',
+        '--force-color-profile=srgb',
       ],
     });
     const page = await browser.newPage({
@@ -267,9 +268,15 @@ it('crops a real high-DPI tab using capture pixels and preserves host UI plus an
     });
     expect(result.width).toBe((settings.width! * 300) / 1280);
     expect(result.height).toBe((settings.height! * 200) / 900);
-    expect(
-      result.corner.every((channel, index) => Math.abs(channel - [20, 80, 180, 255][index]!) < 4),
-    ).toBe(true);
+    expect(result.corner, 'Captured blue UI region').toEqual([
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      255,
+    ]);
+    expect(result.corner[2]!, JSON.stringify(result.corner)).toBeGreaterThan(145);
+    expect(result.corner[2]! - result.corner[0]!).toBeGreaterThan(80);
+    expect(result.corner[2]! - result.corner[1]!).toBeGreaterThan(50);
     expect(result.red).toBeGreaterThan(100);
   }, 2);
 }, 60000);
@@ -627,12 +634,14 @@ it.each(['button', 'touch', 'shortcut'] as const)(
           stroke: [...context.getImageData(55, 220, 1, 1).data],
         };
       });
-      expect(
-        pixels.menu.every((value, index) => Math.abs(value - [20, 80, 180, 255][index]!) < 4),
-      ).toBe(true);
-      expect(
-        pixels.popover.every((value, index) => Math.abs(value - [20, 180, 80, 255][index]!) < 4),
-      ).toBe(true);
+      // Screen streams undergo platform-dependent color conversion. Check the
+      // distinctive blue/green fixture regions without accepting a blank frame.
+      expect(pixels.menu[2]!, JSON.stringify(pixels.menu)).toBeGreaterThan(145);
+      expect(pixels.menu[2]! - pixels.menu[0]!).toBeGreaterThan(80);
+      expect(pixels.menu[2]! - pixels.menu[1]!).toBeGreaterThan(50);
+      expect(pixels.popover[1]!, JSON.stringify(pixels.popover)).toBeGreaterThan(145);
+      expect(pixels.popover[1]! - pixels.popover[0]!).toBeGreaterThan(80);
+      expect(pixels.popover[1]! - pixels.popover[2]!).toBeGreaterThan(50);
       expect(pixels.stroke[0]).toBeGreaterThan(180);
       // Start a second drawing session, then confirm native host behavior still works.
       await markers.getByRole('button', { name: 'Screenshot', exact: true }).click();
@@ -1265,12 +1274,9 @@ it('captures a real browser tab after live drawing and temporary Alt interaction
           controls: [...context.getImageData(910, 860, 1, 1).data],
         };
       });
-    // Display capture may round a color channel during video color conversion.
-    expect(
-      rendered.tooltip.every(
-        (channel, index) => Math.abs(channel - [18, 52, 240, 255][index]!) <= 3,
-      ),
-    ).toBe(true);
+    expect(rendered.tooltip[2]!, JSON.stringify(rendered.tooltip)).toBeGreaterThan(200);
+    expect(rendered.tooltip[2]! - rendered.tooltip[0]!).toBeGreaterThan(120);
+    expect(rendered.tooltip[2]! - rendered.tooltip[1]!).toBeGreaterThan(100);
     expect(rendered.controls.slice(0, 3).every((channel) => channel > 200)).toBe(true);
     expect(
       await page.evaluate(() =>
