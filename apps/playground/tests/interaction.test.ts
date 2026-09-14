@@ -1,6 +1,6 @@
 import { createPlaygroundServer, configurePage } from './helpers';
 import { expect, it } from 'vite-plus/test';
-import { chromium } from 'playwright';
+import { chromium, type Locator } from 'playwright';
 import type { InspectorShell } from '@ainotation/sdk/ui';
 
 it('opens into selection and supports draggable launcher/panel with mouse, touch and keyboard', async () => {
@@ -285,6 +285,15 @@ it('opens into selection and supports draggable launcher/panel with mouse, touch
       .poll(() => touchShell.evaluate((el) => (el as InspectorShell).view.storage))
       .toBe('ready');
     const cdp = await touchContext.newCDPSession(touchPage);
+    const tap = async (control: Locator) => {
+      const bounds = await control.boundingBox();
+      if (!bounds) throw new Error('Missing touch control');
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
     const start = await touchShell.boundingBox();
     await cdp.send('Input.dispatchTouchEvent', {
       type: 'touchStart',
@@ -299,12 +308,32 @@ it('opens into selection and supports draggable launcher/panel with mouse, touch
     const touchPosition = await touchShell.boundingBox();
     expect(Math.abs(touchPosition!.x - 40)).toBeLessThan(2);
     expect(Math.abs(touchPosition!.y - 80)).toBeLessThan(2);
-    // Let the native post-drag click sequence settle before a separate tap.
-    await touchPage.waitForTimeout(550);
-    await touchLauncher.tap();
+    await touchPage.evaluate(() => {
+      const events: string[] = [];
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'click']) {
+        window.addEventListener(
+          type,
+          (event) => {
+            const pointer = event as PointerEvent;
+            events.push(
+              `${type}:${pointer.pointerId}:${pointer.isPrimary}:${pointer.clientX},${pointer.clientY}`,
+            );
+            document.documentElement.dataset.touchTrace = JSON.stringify(events);
+          },
+          { capture: true },
+        );
+      }
+    });
+    await tap(touchLauncher);
     await expect
       .poll(() => touchShell.evaluate((el) => (el as InspectorShell).view.picking))
-      .toBe(true);
+      .toBe(true)
+      .catch(async (error) => {
+        throw new Error(
+          `Touch activation failed: ${await touchPage.locator('html').getAttribute('data-touch-trace')}`,
+          { cause: error },
+        );
+      });
     const touchHeader = await touchShell
       .getByRole('group', { name: 'Move inspector' })
       .boundingBox();
@@ -322,17 +351,17 @@ it('opens into selection and supports draggable launcher/panel with mouse, touch
       2,
     );
     const movedTouchToolbar = await touchShell.boundingBox();
-    await touchShell.getByRole('button', { name: 'Close inspector', exact: true }).tap();
+    await tap(touchShell.getByRole('button', { name: 'Close inspector', exact: true }));
     expect(await touchShell.evaluate((el) => (el as InspectorShell).view.picking)).toBe(false);
     const foldedTouch = await touchShell.boundingBox();
     expect(foldedTouch!.x).toBe(movedTouchToolbar!.x);
     expect(foldedTouch!.y + foldedTouch!.height).toBe(
       movedTouchToolbar!.y + movedTouchToolbar!.height,
     );
-    await touchLauncher.tap();
+    await tap(touchLauncher);
     expect(await touchShell.boundingBox()).toEqual(movedTouchToolbar);
-    await touchShell.getByRole('button', { name: 'Close inspector', exact: true }).tap();
-    await touchPage.getByRole('button', { name: 'Unmount inspector', exact: true }).tap();
+    await tap(touchShell.getByRole('button', { name: 'Close inspector', exact: true }));
+    await tap(touchPage.getByRole('button', { name: 'Unmount inspector', exact: true }));
     await expect.poll(() => touchPage.locator('[data-ainotation-ui]').count()).toBe(0);
     expect(errors).toEqual([]);
     expect([pendingBox, savedBox].map(({ width, height }) => ({ width, height }))).toEqual([
