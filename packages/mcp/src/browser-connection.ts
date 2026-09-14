@@ -32,9 +32,13 @@ export function createBrowserConnection(options: {
     },
     async fetch(
       path: string,
-      request: { method: 'GET' | 'POST'; body?: string; signal: AbortSignal },
+      request: {
+        method: 'GET' | 'POST';
+        body?: string | Uint8Array<ArrayBuffer>;
+        signal: AbortSignal;
+      },
     ): Promise<Response> {
-      if (!/^\/sessions\/[a-f0-9-]+\/(sync|events)$/i.test(path))
+      if (!/^\/sessions\/[a-f0-9-]+\/(sync|events|images\/[a-f0-9-]+)$/i.test(path))
         throw new ProjectError('Invalid browser proxy path');
       request.signal.throwIfAborted();
       const connection = await leases.get();
@@ -44,7 +48,12 @@ export function createBrowserConnection(options: {
           headers: {
             Authorization: `Bearer ${connection.grant.token}`,
             Origin: options.origin,
-            ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+            ...(request.body === undefined
+              ? {}
+              : {
+                  'Content-Type':
+                    typeof request.body === 'string' ? 'application/json' : 'image/png',
+                }),
           },
           ...(request.body === undefined ? {} : { body: request.body }),
           signal: AbortSignal.any([leases.signal, request.signal]),

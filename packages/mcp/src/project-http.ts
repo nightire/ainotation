@@ -10,6 +10,7 @@ import { AnnotationPatchSchema, CreateAnnotationSchema, StoreError } from './sto
 import { GrantRequestSchema, type ProjectService } from './project-service';
 import { matchesToken, readJson, sendError, sendJson } from './http-common';
 import { ProjectDeclarationSchema, ProjectError } from './project';
+import { imageHttp } from './image-http';
 
 type Scope = Awaited<ReturnType<ProjectService['authorize']>>;
 
@@ -141,6 +142,16 @@ export async function startProjectHttpServer(options: {
         return;
       }
       let scope = await scopeFor(request);
+      if (
+        await imageHttp(request, response, async () => {
+          const authorized = await scopeFor(request);
+          return {
+            store: authorized.store,
+            ...(authorized.grant.kind === 'browser' ? { origin: authorized.grant.origin } : {}),
+          };
+        })
+      )
+        return;
       if (request.method === 'GET' && path === '/health') {
         json(200, {
           ok: true,

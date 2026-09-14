@@ -2,13 +2,103 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request as httpRequest } from 'node:http';
+import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, expect, it } from 'vite-plus/test';
 import { initializeProject } from './project';
 import { startSharedService, readServiceConnection } from './shared-service';
 import { type IssuedGrant } from './project-service';
 import { fixture, origin } from './fixtures';
+import { createFeedbackStore } from './store';
 
 const cleanup: (() => Promise<unknown>)[] = [];
+
+it('stores PNG bytes separately, verifies content, and authorizes image access by project and session', async () => {
+  const { root, request, json, first, second, grant } = await setup();
+  const browser = await grant(first.projectId, 'browser');
+  const agent = await grant(first.projectId, 'agent');
+  const foreign = await grant(second.projectId, 'agent');
+  const png = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+    'base64',
+  );
+  const document = fixture();
+  const image = {
+    id: randomUUID(),
+    mimeType: 'image/png' as const,
+    source: 'import' as const,
+    width: 1,
+    height: 1,
+    size: png.length,
+    sha256: createHash('sha256').update(png).digest('hex'),
+  };
+  document.annotations[0]!.images = [image];
+  const sync = json({ document, operations: [] });
+  expect(
+    (
+      await request(`/sessions/${document.id}/sync`, browser.token, {
+        ...sync,
+        headers: { ...sync.headers, Origin: origin },
+      })
+    ).status,
+  ).toBe(200);
+  const path = `/sessions/${document.id}/images/${image.id}`;
+  expect((await request(path, agent.token)).status).toBe(404);
+  const upload = {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'image/png' },
+    body: png,
+  };
+  expect(
+    (await request(path, browser.token, { ...upload, body: Buffer.from('not an image') })).status,
+  ).toBe(400);
+  expect((await request(path, browser.token, upload)).status).toBe(200);
+  expect((await request(path, browser.token, upload)).status).toBe(200);
+  expect((await request(path, foreign.token)).status).toBe(404);
+  expect((await request(`/sessions/${randomUUID()}/images/${image.id}`, agent.token)).status).toBe(
+    404,
+  );
+  expect(
+    (
+      await request(path, agent.token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png' },
+        body: png,
+      })
+    ).status,
+  ).toBe(405);
+  const response = await request(path, agent.token);
+  expect(response.headers.get('content-type')).toBe('image/png');
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(png);
+  const reopened = await createFeedbackStore({
+    filePath: join(root, 'service', 'projects', first.projectId, 'feedback.json'),
+  });
+  expect(await reopened.getImage(document.id, image.id)).toEqual(png);
+  const replacement = structuredClone(document.annotations[0]!);
+  replacement.images![0]!.sha256 = 'f'.repeat(64);
+  const replaceRequest = json({
+    document,
+    operations: [{ id: randomUUID(), kind: 'upsert', annotation: replacement }],
+  });
+  expect(
+    (
+      await request(`/sessions/${document.id}/sync`, browser.token, {
+        ...replaceRequest,
+        headers: { ...replaceRequest.headers, Origin: origin },
+      })
+    ).status,
+  ).toBe(409);
+  expect(Buffer.from(await (await request(path, agent.token)).arrayBuffer())).toEqual(png);
+  expect(
+    (
+      await request(
+        `/sessions/${document.id}/annotations/${document.annotations[0]!.id}`,
+        agent.token,
+        { method: 'DELETE' },
+      )
+    ).status,
+  ).toBe(200);
+  expect((await request(path, agent.token)).status).toBe(404);
+});
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });

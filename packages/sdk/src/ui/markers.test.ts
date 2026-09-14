@@ -44,6 +44,38 @@ const second: Annotation = {
 };
 const cleanup: (() => void)[] = [];
 
+it('accepts image paste and drop inside the feedback popover while preserving ordinary text paste', () => {
+  const { root, onAction } = mount({
+    editorOpen: true,
+    marker: { x: 100, y: 100, space: 'viewport' },
+  });
+  const popover = root.querySelector('.popover')!;
+  const file = new File(['png'], 'external.png', { type: 'image/png' });
+  const data = new DataTransfer();
+  data.items.add(file);
+  const paste = new ClipboardEvent('paste', {
+    clipboardData: data,
+    bubbles: true,
+    cancelable: true,
+  });
+  popover.dispatchEvent(paste);
+  expect(paste.defaultPrevented).toBe(true);
+  expect(onAction).toHaveBeenLastCalledWith({ type: 'import-image', file });
+  const drop = new DragEvent('drop', { dataTransfer: data, bubbles: true, cancelable: true });
+  popover.dispatchEvent(drop);
+  expect(drop.defaultPrevented).toBe(true);
+  expect(onAction).toHaveBeenLastCalledWith({ type: 'import-image', file });
+  const text = new DataTransfer();
+  text.setData('text/plain', 'Keep this text');
+  const plain = new ClipboardEvent('paste', {
+    clipboardData: text,
+    bubbles: true,
+    cancelable: true,
+  });
+  popover.dispatchEvent(plain);
+  expect(plain.defaultPrevented).toBe(false);
+});
+
 afterEach(async () => {
   for (const dispose of cleanup.splice(0).reverse()) dispose();
   vi.restoreAllMocks();
@@ -268,11 +300,13 @@ describe('in-place annotation markers', () => {
     expect(root.textContent).not.toMatch(/Private stored reply|acknowledged|resolved|reopen/i);
     const buttons = [...root.querySelectorAll<HTMLButtonElement>('.actions button')];
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Screenshot',
+      'Choose image',
       'Cancel',
       'Save',
       'Delete',
     ]);
-    for (const button of buttons) {
+    for (const button of buttons.slice(2)) {
       expect(button.textContent?.trim()).toBe('');
       expect(button.title).toBe(
         button.classList.contains('primary')
@@ -281,15 +315,15 @@ describe('in-place annotation markers', () => {
       );
       expect(button.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
     }
-    for (const button of buttons) button.click();
+    for (const button of buttons.slice(2)) button.click();
     expect(onAction.mock.calls.map(([action]) => action)).toEqual([
       { type: 'cancel-edit' },
       { type: 'save' },
       { type: 'delete', id: annotation.id },
     ]);
     layer.update({ ...view, saving: true }, true);
-    expect(buttons[1]!.disabled).toBe(true);
-    expect(buttons[2]!.disabled).toBe(true);
+    expect(buttons[3]!.disabled).toBe(true);
+    expect(buttons[4]!.disabled).toBe(true);
     expect(view).toEqual(original);
   });
 

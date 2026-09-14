@@ -3,6 +3,7 @@ import { openDB } from 'idb';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import { createDraftStore, type DraftStore } from './storage';
+import { canvasBlob, describeImage } from './images';
 
 const stores: DraftStore[] = [];
 const keys: string[] = [];
@@ -64,6 +65,32 @@ afterEach(async () => {
 });
 
 describe('draft storage in IndexedDB', () => {
+  it('persists image blobs atomically with draft references, isolates pages and releases unreferenced images', async () => {
+    const store = await openStore();
+    const key = pageKey();
+    const canvas = document.createElement('canvas');
+    canvas.width = 10;
+    canvas.height = 10;
+    const blob = await canvasBlob(canvas);
+    const image = await describeImage(blob, 'import');
+    await store.update(key, location.href, (record) => ({
+      ...record,
+      draft: { ...record.draft, images: [image] },
+      images: { [image.id]: blob },
+    }));
+    await store.close();
+    const reopened = await openStore();
+    const persisted = await reopened.load(key, location.href);
+    expect(persisted.draft.images).toEqual([image]);
+    expect(persisted.images?.[image.id]).toBeInstanceOf(Blob);
+    expect(await persisted.images![image.id]!.arrayBuffer()).toEqual(await blob.arrayBuffer());
+    expect((await reopened.load(pageKey(), location.href)).images).toEqual({});
+    const cleared = await reopened.update(key, location.href, (record) => ({
+      ...record,
+      draft: { ...record.draft, images: [] },
+    }));
+    expect(cleared.images).toEqual({});
+  });
   it('does not replay a failing reducer or downgrade storage for application errors', async () => {
     const store = await openStore();
     const key = pageKey();

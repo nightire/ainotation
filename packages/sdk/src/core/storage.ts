@@ -8,6 +8,7 @@ import {
   TargetSnapshotSchema,
   MarkerAnchorSchema,
   PageSnapshotSchema,
+  FeedbackImagesSchema,
 } from '@ainotation/schema';
 import type {
   FeedbackDocument,
@@ -16,6 +17,7 @@ import type {
   TargetSnapshot,
   MarkerAnchor,
   PageSnapshot,
+  FeedbackImage,
 } from '@ainotation/schema';
 
 export interface DraftRecord {
@@ -28,7 +30,9 @@ export interface DraftRecord {
     marker?: MarkerAnchor;
     editorOpen?: boolean;
     page?: PageSnapshot;
+    images?: FeedbackImage[];
   };
+  images?: Record<string, Blob>;
   authority: string | null;
   multipleSelection?: boolean;
 }
@@ -100,7 +104,20 @@ export async function createDraftStore(options: {
       const value = input as DraftRecord;
       const document = FeedbackDocumentSchema.parse(value.document);
       if (url !== undefined && document.url !== url) throw new Error('Stored page mismatch');
+      const draftImages = FeedbackImagesSchema.parse(value.draft.images ?? []);
+      const referenced = new Set(
+        [
+          ...document.annotations.flatMap((annotation) => annotation.images ?? []),
+          ...draftImages,
+        ].map((image) => image.id),
+      );
+      const images = Object.fromEntries(
+        Object.entries(value.images ?? {}).filter(
+          ([id, blob]) => referenced.has(id) && blob instanceof Blob,
+        ),
+      );
       return {
+        images,
         ...(typeof value.multipleSelection === 'boolean'
           ? { multipleSelection: value.multipleSelection }
           : {}),
@@ -111,6 +128,7 @@ export async function createDraftStore(options: {
           text: typeof value.draft.text === 'string' ? value.draft.text.slice(0, 10000) : '',
           editingId: typeof value.draft.editingId === 'string' ? value.draft.editingId : null,
           targets: TargetSnapshotSchema.array().max(20).parse(value.draft.targets),
+          ...(draftImages.length ? { images: draftImages } : {}),
           ...(value.draft.marker ? { marker: MarkerAnchorSchema.parse(value.draft.marker) } : {}),
           ...(value.draft.page ? { page: PageSnapshotSchema.parse(value.draft.page) } : {}),
           ...(typeof value.draft.editorOpen === 'boolean'
@@ -246,6 +264,7 @@ export async function createDraftStore(options: {
         ) {
           record.draft = {
             text: record.draft.text,
+            ...(record.draft.images?.length ? { images: record.draft.images } : {}),
             editingId: null,
             targets: [],
             editorOpen: false,
@@ -272,7 +291,14 @@ export async function createDraftStore(options: {
     ) {
       return update(key, url, (record) => {
         const identity = (draft: DraftRecord['draft']) =>
-          JSON.stringify([draft.text, draft.editingId, draft.targets, draft.marker, draft.page]);
+          JSON.stringify([
+            draft.text,
+            draft.editingId,
+            draft.targets,
+            draft.marker,
+            draft.page,
+            draft.images ?? [],
+          ]);
         const clearDraft = submittedDraft && identity(record.draft) === identity(submittedDraft);
         return {
           ...record,
@@ -284,7 +310,7 @@ export async function createDraftStore(options: {
         };
       });
     },
-    applySync(key: string, url: string, response: SyncResponse) {
+    applySync(key: string, url: string, response: SyncResponse, images: Record<string, Blob> = {}) {
       return update(key, url, (record) => {
         if (record.document.id !== response.document.id || response.document.url !== url)
           throw new Error('MCP session mismatch');
@@ -296,7 +322,13 @@ export async function createDraftStore(options: {
           draft.editingId &&
           !document.annotations.some((annotation) => annotation.id === draft.editingId)
         ) {
-          draft = { text: draft.text, editingId: null, targets: [], editorOpen: false };
+          draft = {
+            text: draft.text,
+            ...(draft.images?.length ? { images: draft.images } : {}),
+            editingId: null,
+            targets: [],
+            editorOpen: false,
+          };
         }
         const deletedEdit = [...record.operations]
           .reverse()
@@ -315,6 +347,9 @@ export async function createDraftStore(options: {
         if (!draft.text && deletedEdit?.kind === 'upsert') {
           draft = {
             text: deletedEdit.annotation.comment,
+            ...(deletedEdit.annotation.images?.length
+              ? { images: deletedEdit.annotation.images }
+              : {}),
             editingId: null,
             targets: [],
             editorOpen: false,
@@ -323,6 +358,7 @@ export async function createDraftStore(options: {
         return {
           ...record,
           document,
+          images: { ...record.images, ...images },
           operations,
           draft,
         };

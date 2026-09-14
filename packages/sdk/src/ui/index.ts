@@ -750,8 +750,8 @@ export class InspectorShell extends LitElement {
           <button
             class="icon"
             type="button"
-            aria-label="Export JSON"
-            title="Export JSON for this page"
+            aria-label=${view.document?.annotations.some((annotation) => annotation.images?.length) ? 'Export feedback and images' : 'Export JSON'}
+            title=${view.document?.annotations.some((annotation) => annotation.images?.length) ? 'Export this page with image attachments' : 'Export JSON for this page'}
             ?disabled=${!view.document}
             @click=${() => this.onaction({ type: 'export' })}
           >

@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createServer, build } from 'vite-plus';
 import { chromium } from 'playwright';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -317,6 +317,17 @@ it.each(['change', 'remove'] as const)(
     const initial = await connect();
     expect(initial.status).toBe(200);
     await initial.body?.cancel();
+    // The watcher is initialized asynchronously after server startup. Mutate
+    // only after the fixture is being watched, so unlink cannot precede add.
+    await expect
+      .poll(
+        () =>
+          app.server.watcher
+            .getWatched()
+            [dirname(app.project.configPath!)]?.includes(basename(app.project.configPath!)),
+        { timeout: 3000 },
+      )
+      .toBe(true);
     if (mode === 'remove') await rm(app.project.configPath!);
     else
       await writeFile(

@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { SyncRequestSchema } from '@ainotation/schema';
+import { MAX_IMAGE_BYTES, SyncRequestSchema } from '@ainotation/schema';
 import type { ProjectInfo } from '@ainotation/mcp/project';
 import type { createBrowserConnection } from '@ainotation/mcp/browser';
 
@@ -94,23 +94,33 @@ export function createDevelopmentBridge(options: {
           json(response, 403, { error: 'Origin or Host not allowed for this connection' });
           return;
         }
-        const route = /^\/api(\/sessions\/[a-f0-9-]{36}\/(sync|events))$/i.exec(suffix);
-        if (!route || request.method !== (route[2] === 'sync' ? 'POST' : 'GET')) {
+        const route =
+          /^\/api(\/sessions\/[a-f0-9-]{36}\/(sync|events|images\/[a-f0-9-]{36}))$/i.exec(suffix);
+        const image = route?.[2]?.startsWith('images/');
+        if (
+          !route ||
+          (image
+            ? !['GET', 'POST'].includes(request.method ?? '')
+            : request.method !== (route[2] === 'sync' ? 'POST' : 'GET'))
+        ) {
           json(response, 404, { error: 'Bridge route not found' });
           return;
         }
-        let body: string | undefined;
+        let body: string | Uint8Array<ArrayBuffer> | undefined;
         if (request.method === 'POST') {
           if (
-            !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(
+            !(image ? /^image\/png$/i : /^application\/json(?:\s*;\s*charset=utf-8)?$/i).test(
               request.headers['content-type'] ?? '',
             ) ||
             request.headers['content-encoding']
           ) {
-            json(response, 415, { error: 'Expected unencoded application/json' });
+            json(response, 415, {
+              error: `Expected unencoded ${image ? 'image/png' : 'application/json'}`,
+            });
             return;
           }
-          if (Number(request.headers['content-length']) > MAX_BODY_BYTES) {
+          const limit = image ? MAX_IMAGE_BYTES : MAX_BODY_BYTES;
+          if (Number(request.headers['content-length']) > limit) {
             json(response, 413, { error: 'Request too large' });
             return;
           }
@@ -119,7 +129,7 @@ export function createDevelopmentBridge(options: {
           for await (const chunk of request.iterator({ destroyOnReturn: false })) {
             const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
             size += buffer.length;
-            if (size > MAX_BODY_BYTES) {
+            if (size > limit) {
               request.resume();
               json(response, 413, { error: 'Request too large' });
               return;
@@ -127,9 +137,11 @@ export function createDevelopmentBridge(options: {
             chunks.push(buffer);
           }
           try {
-            body = JSON.stringify(
-              SyncRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString('utf8'))),
-            );
+            body = image
+              ? new Uint8Array(Buffer.concat(chunks))
+              : JSON.stringify(
+                  SyncRequestSchema.parse(JSON.parse(Buffer.concat(chunks).toString('utf8'))),
+                );
           } catch {
             json(response, 400, { error: 'Invalid feedback request' });
             return;
@@ -149,7 +161,12 @@ export function createDevelopmentBridge(options: {
           return;
         }
         response.writeHead(200, {
-          'Content-Type': route[2] === 'events' ? 'text/event-stream' : 'application/json',
+          'Content-Type':
+            route[2] === 'events'
+              ? 'text/event-stream'
+              : image && request.method === 'GET'
+                ? 'image/png'
+                : 'application/json',
           ...(route[2] === 'events' ? { 'X-Accel-Buffering': 'no' } : {}),
         });
         const reader = upstream.body.getReader();

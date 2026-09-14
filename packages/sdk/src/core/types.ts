@@ -3,6 +3,7 @@ import type {
   MarkerAnchor,
   TargetSnapshot,
   OutputDetail,
+  FeedbackImage,
 } from '@ainotation/schema';
 
 export const outputDetails: { value: OutputDetail; label: string; description: string }[] = [
@@ -55,6 +56,8 @@ export interface InspectorViewState {
   theme: InspectorTheme;
   managedConnection: boolean;
   projectName: string;
+  images: FeedbackImage[];
+  imageUrls: Record<string, string>;
 }
 
 export type InspectorAction =
@@ -66,7 +69,10 @@ export type InspectorAction =
   | { type: 'set-theme'; value: InspectorTheme }
   | { type: 'draft'; value: string }
   | { type: 'edit' | 'delete'; id: string }
-  | { type: 'connect'; endpoint: string; token: string };
+  | { type: 'connect'; endpoint: string; token: string }
+  | { type: 'screenshot' }
+  | { type: 'import-image'; file: File }
+  | { type: 'remove-image' | 'download-image' | 'edit-image'; id: string };
 
 export function emptyViewState(): InspectorViewState {
   return {
@@ -89,5 +95,7 @@ export function emptyViewState(): InspectorViewState {
     theme: 'light',
     managedConnection: false,
     projectName: '',
+    images: [],
+    imageUrls: {},
   };
 }

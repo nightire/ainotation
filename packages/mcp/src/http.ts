@@ -4,6 +4,7 @@ import { SyncRequestSchema } from '@ainotation/schema';
 import { z } from 'zod';
 import { FeedbackStore, StoreError } from './store';
 import { readJson, isExactOrigin, sendError } from './http-common';
+import { imageHttp } from './image-http';
 
 export async function startHttpServer(options: {
   store: FeedbackStore;
@@ -67,6 +68,7 @@ export async function startHttpServer(options: {
         json(200, { ok: true });
         return;
       }
+      if (await imageHttp(request, response, async () => ({ store, origin }))) return;
       const match = /^\/sessions\/([^/]+)\/(sync|events)$/.exec(request.url ?? '');
       if (!match) throw new StoreError(404, 'Route not found');
       const sessionId = z.uuid().parse(match[1]);

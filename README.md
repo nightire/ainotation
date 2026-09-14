@@ -1,6 +1,6 @@
 # Ainotation
 
-框架无关的页面反馈工具。里程碑一聚焦持久化的单次标注：DOM 单选/多选、标注增删改、批量 Markdown/JSON 交接及 MCP 标注 CRUD。多轮对话架构和历史数据保留在内部，当前 UI 和 MCP 不提供回复、会话讨论或处理状态工作流。原生动画检查、截图编辑与图片附件属于后续里程碑。
+框架无关的页面反馈工具，支持 DOM 单选/多选、持久化标注、实时页面绘图与图片附件，以及按项目隔离的 MCP 交接。多轮对话架构和历史数据保留在内部，当前 UI 和 MCP 不提供回复、会话讨论或处理状态工作流。原生动画检查属于后续里程碑。
 
 ## 工作区
 
@@ -166,9 +166,9 @@ node packages/mcp/dist/cli.mjs --store /path/to/feedback.json
 node packages/mcp/dist/cli.mjs --memory
 ```
 
-默认允许 `http://127.0.0.1:5173` 与 `http://localhost:5173`。显式的 `--origin` 会替换默认列表，可重复指定。服务仅绑定 loopback，验证 Host、精确 Origin、Bearer token、JSON 请求和会话归属。页面 origin 与连接服务的允许列表必须一致；请求正文上限为 1 MiB。
+默认允许 `http://127.0.0.1:5173` 与 `http://localhost:5173`。显式的 `--origin` 会替换默认列表，可重复指定。服务仅绑定 loopback，验证 Host、精确 Origin、Bearer token、JSON 请求和会话归属。页面 origin 与连接服务的允许列表必须一致；JSON 请求正文上限为 1 MiB，图片通过独立端点传输，单张上限 8 MiB。
 
-MCP 工具包括 `ainotation_list_sessions`、`ainotation_get_feedback`、`ainotation_get_annotation`、`ainotation_create_annotation`、`ainotation_update_annotation`、`ainotation_delete_annotation` 和 `ainotation_get_schema`。浏览器连接建立页面会话后，Agent 可读取 sessionId 与标注上下文。修改操作必须明确 sessionId 与 annotationId，CRUD 变化通过 SSE 同步到浏览器并保存。
+MCP 工具包括 `ainotation_list_sessions`、`ainotation_get_feedback`、`ainotation_get_annotation`、`ainotation_get_image`、`ainotation_create_annotation`、`ainotation_update_annotation`、`ainotation_delete_annotation` 和 `ainotation_get_schema`。浏览器连接建立页面会话后，Agent 可读取 sessionId 与标注上下文；图片按需使用 sessionId 与 imageId 读取，返回 PNG image content。修改操作必须明确 sessionId 与 annotationId，CRUD 变化通过 SSE 同步到浏览器并保存。
 
 创建需要客户端提供 UUID、comment、page 和 targets，相同内容的重试不会重复创建。更新使用非空 `patch`，只接受 comment、page、targets，不能修改对话或处理状态；删除保留墓碑。`ainotation_reply`、`ainotation_acknowledge`、`ainotation_resolve`、`ainotation_dismiss` 和按处理状态筛选的工具暂不注册。内部存储层的对话能力及对应测试继续保留。
 
@@ -180,4 +180,30 @@ MCP 工具包括 `ainotation_list_sessions`、`ainotation_get_feedback`、`ainot
 
 已配置 Changesets。实现需要记录版本影响的变更时运行 `vp run changeset`；发布准备阶段使用 `vp run version-packages`。当前未自动提交、打 tag 或发布包。
 
-`AGENTS.md` 记录已确定的技术栈与边界。测试截图和其它本机产物位于 git 忽略目录，不参与发布。当前自动化覆盖 Chrome；里程碑一已通过 Firefox/Safari 手动验收。新增自动接入流程的浏览器回归目前使用 Chrome。闭合 Shadow DOM、iframe 内部、源码定位、动画和图片附件尚未纳入此里程碑。
+`AGENTS.md` 记录已确定的技术栈与边界。测试截图和其它本机产物位于 git 忽略目录，不参与发布。当前自动化覆盖 Chrome；里程碑一已通过 Firefox/Safari 手动验收。自动接入与图片标注回归目前使用 Chrome，图片测试包含真实标签页捕获。闭合 Shadow DOM、iframe 内部 DOM 上下文、源码定位和动画检查尚未纳入此里程碑。
+
+## 图片标注
+
+**Crop（X）** 用于只截取部分 UI：拖动框出需要保留的区域，拖动选区内部可移动，右下角控制柄可调整大小；在裁剪工具中按 **D** 或点击清除按钮可清除裁剪。切换其他绘图工具后裁剪区域仍保留，可以继续标注。裁剪的创建、移动、调整和清除支持撤销/重做。完成时先裁剪、再按需缩小和编码，选区外内容、裁剪遮罩和控制柄都不会进入 PNG。实时页面裁剪请共享当前浏览器标签页；共享整个窗口或屏幕时无法可靠映射页面位置，可先生成完整截图，再打开附件进行图片裁剪。
+
+切换到 **Select / Move（V）** 后，在空白处拖动即可框选多个图形，正向和反向拖动均可，与选框相交的图形包围范围会被选中。按住 **Shift** 框选可增补选择，Shift 点击图形可加入或移出选择。拖动任意已选图形或整体虚线边界可一起移动；**D** 或删除按钮批量删除，颜色和线宽也可统一修改。每次批量操作对应一次撤销/重做，并恢复相应选择状态；点击空白处清空选择。多选只显示整体虚线边界，框选框和选择边界不会进入生成的截图。
+
+实时绘图与整个截图工具栏的鼠标、触屏操作在 window 捕获阶段统一接管，覆盖工具切换、颜色及线宽 popover、撤销/重做、删除、取消、确认和工具栏空白处，避免到达宿主 document 上的外部点击关闭监听。鼠标操作不转移宿主焦点；通过键盘激活选择器时，仍支持焦点导航和返回按钮。线宽使用自绘 popover，避免原生下拉框打开时抢占焦点。绘图层会挂入当前打开的原生 popover 或 modal，以避免原生弹出层将绘图识别为外部点击。按住 Option/Alt 时恢复正常页面事件；准备好菜单后，可松开 Alt 绘图、点击工具栏调整，再点击确认按钮或通过完成快捷键截图。页面自身的鼠标移出、计时关闭等行为仍由宿主控制。
+
+绘图工具栏的 **Line width** 提供 0.5、1、1.5、2、3、4、5 px，默认 3 px。选中图形时调整该图形的线宽，并设置后续绘图的线宽；未选中时只设置后续绘图的线宽。线宽修改支持撤销和重做，生成图片保留所选粗细。
+
+工具栏各操作的 tooltip 包含快捷键：**V** 选择/移动、**A** 箭头、**R** 矩形、**E** 椭圆、**F** 自由绘制，**C** 循环选择六种预设颜色，**S** 循环线宽。颜色按钮仅显示当前颜色，点击展开六色色板；支持方向键选择、Enter 确认、Esc 关闭色板。**Command / Ctrl + Z** 撤销、**Command / Ctrl + Shift + Z** 重做，**D** 删除选中图形，**Esc** 取消绘图，**Command / Ctrl + Enter** 完成并附图。快捷键仅在绘图编辑器打开时生效；工具、颜色、线宽及图形编辑快捷键不拦截输入框、原生下拉框或 Option/Alt 穿透时的页面输入。工具栏上方不再常驻快捷键说明，仅在操作失败时显示错误信息。
+
+创建或打开 marker 后，在 popover 点击 **Screenshot**，选择当前标签页并授权，即可在真实页面上绘制箭头、矩形、椭圆和自由画笔。拖动图形轮廓即可选中并移动，无需切换工具；颜色按钮可修改当前图形，支持删除、撤销和重做。选中图形仅显示一个 6px 方块控制柄，命中范围更大：箭头位于尾部，拖动改变长度与方向，尖端固定；矩形、椭圆和画笔位于自身包围框的右下角，拖动缩放，控制柄外侧稍远处拖动则绕中心旋转。旋转后缩放仍沿图形自身方向，对角保持固定。图形按页面文档坐标绘制，滚动时随文档移动。
+
+绘制时按住 **Option / Alt** 可操作宿主页面，松开恢复绘图。也可以在保持 Alt 穿透和 hover 的同时按 **Command / Ctrl + Enter** 捕获，保留这一刻的提示、菜单等画面；直接松开 Alt 可能让宿主的 hover 状态消失。工具不冻结或修改宿主的交互状态。完成按钮和快捷键都会隐藏编辑控件、取帧并停止共享，图形保留在生成的截图中。原生 modal 打开时，绘图层会进入该 dialog，以保持可操作。
+
+popover 也支持**粘贴、拖入或选择 PNG/JPEG/WebP 图片**，通过同一绘图工具编辑后生成 PNG。图片先附在当前草稿中，点击 **Add / Save** 后随 feedback 保存；刷新后仍可恢复。缩略图可打开继续绘制、单独下载或移除。已附上的 PNG 是合成后的截图，重新打开会把之前的图形视为底图。
+
+每条标注最多 8 张图片，单张最多 8 MiB、16,777,216 像素，单边最多 16,384 像素。生成截图时，超过像素尺寸的画面会先按比例缩小，完整保留画面内容；PNG 编码后若仍超过 8 MiB，会继续按比例缩小并重新编码。符合限制时保留原分辨率，降采样只在超限时发生，可能降低细小文字和线条的细节。外部图片导入仍需符合上述文件大小与尺寸限制。图形数量不会改变捕获帧的尺寸，但画面复杂度会影响 PNG 文件大小。基础 DOM 标注不受截图 API 是否可用影响。原生截图需要 HTTPS 或 localhost 的安全上下文及浏览器/系统授权；不支持时可使用外部截图导入。捕获来源由用户选择，选择其他窗口或屏幕时生成的是所选来源的实际画面。
+
+没有图片时，导出仍为当前页面的 JSON；有图片时，导出一个 ZIP，内含 `feedback.json`、`feedback.md` 和以附件 UUID 命名的 PNG。Markdown 复制包含图片文件名及附件 ID，图片由下载或 MCP 的 `ainotation_get_image` 获取。图片通过独立的鉴权端点上传下载，反馈 JSON 只含尺寸、摘要和来源等元数据。删除附件或所属 feedback 后，MCP 不再提供该图片。
+
+反馈文本和删除操作会先同步；图片尚未上传完成或临时下载失败时，本地反馈更新仍可应用，附件在重试后补齐。同一个附件 ID 的内容保持不变，替换图片会生成新的 ID。图片读取在传输过程中限制大小。捕获来源的 ImageCapture 取帧不可用或失败时，只要媒体流和视频帧仍有效，会使用视频帧完成截图。
+
+更新到支持图片的版本后，需要重启仍在运行的旧 MCP 服务和客户端，使新路由与工具生效。可使用 `node packages/mcp/dist/cli.mjs service --stop` 结束旧服务，然后由开发服务器/MCP 重新发现启动。

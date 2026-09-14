@@ -7,10 +7,27 @@ import {
   feedbackMarkdown,
   feedbackExport,
   feedbackExportJsonSchema,
+  FeedbackImagesSchema,
 } from './index';
 import type { Annotation } from './index';
 
 describe('feedback contract', () => {
+  it('rejects oversized pixel dimensions and duplicate image IDs', () => {
+    const image = {
+      id: crypto.randomUUID(),
+      mimeType: 'image/png',
+      source: 'screen',
+      width: 800,
+      height: 600,
+      size: 1234,
+      sha256: '0'.repeat(64),
+    };
+    expect(FeedbackImagesSchema.safeParse([image]).success).toBe(true);
+    expect(FeedbackImagesSchema.safeParse([image, image]).success).toBe(false);
+    expect(FeedbackImagesSchema.safeParse([{ ...image, width: 8000, height: 8000 }]).success).toBe(
+      false,
+    );
+  });
   it('creates an independent serializable document', () => {
     const document = createFeedbackDocument('http://localhost:5173');
     expect(FeedbackDocumentSchema.parse(JSON.parse(JSON.stringify(document)))).toEqual(document);

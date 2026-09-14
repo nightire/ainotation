@@ -33,13 +33,14 @@ async function connect(store?: FeedbackStore) {
   return { client, call };
 }
 
-it('serves exactly seven annotation tools and the public schema over MCP without an HTTP port', async () => {
+it('serves annotation and image tools and the public schema over MCP without an HTTP port', async () => {
   const { client, call } = await connect();
   const tools = (await client.listTools()).tools;
   expect(tools.map((tool) => tool.name)).toEqual([
     'ainotation_get_schema',
     'ainotation_list_sessions',
     'ainotation_get_feedback',
+    'ainotation_get_image',
     'ainotation_create_annotation',
     'ainotation_get_annotation',
     'ainotation_update_annotation',
@@ -50,6 +51,7 @@ it('serves exactly seven annotation tools and the public schema over MCP without
       'ainotation_get_schema',
       'ainotation_list_sessions',
       'ainotation_get_feedback',
+      'ainotation_get_image',
       'ainotation_get_annotation',
     ].includes(tool.name);
     expect(tool.annotations?.readOnlyHint).toBe(readOnly);

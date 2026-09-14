@@ -1,4 +1,4 @@
-import { AnnotationSchema } from '@ainotation/schema';
+import { AnnotationSchema, MAX_ANNOTATION_IMAGES } from '@ainotation/schema';
 import type {
   Annotation,
   FeedbackDocument,
@@ -16,6 +16,8 @@ import { createMarkerLayer } from './ui/markers';
 import { bindPreferences } from './runtime-preferences';
 import { copyProjectFeedback, createFeedbackDownloads } from './core/handoff';
 import { developmentBridge, type DevelopmentConnection } from './core/development';
+import { requestCapture } from './core/capture';
+import { describeImage } from './core/images';
 
 export async function createRuntime(
   shell: InspectorShell,
@@ -41,6 +43,8 @@ export async function createRuntime(
   let saving = false;
   let editorVersion = 0;
   let selectionPage: PageSnapshot | null = null;
+  let drawing: AbortController | null = null;
+  const imageUrls = new Map<string, string>();
   let markerLayer: ReturnType<typeof createMarkerLayer> | undefined;
   let pendingPicking: boolean | null = null;
   let storageReady = false;
@@ -50,12 +54,23 @@ export async function createRuntime(
   const credentialsKey = `ainotation:mcp:${project}`;
   const render = () => {
     if (!disposed && !signal.aborted) {
+      for (const [id, url] of imageUrls) {
+        if (!view.images.some((image) => image.id === id)) {
+          URL.revokeObjectURL(url);
+          imageUrls.delete(id);
+        }
+      }
+      for (const image of view.images) {
+        const blob = record?.images?.[image.id];
+        if (blob && !imageUrls.has(image.id)) imageUrls.set(image.id, URL.createObjectURL(blob));
+      }
+      view.imageUrls = Object.fromEntries(imageUrls);
       shell.view = {
         ...view,
         selected: [...view.selected],
         availability: { ...view.availability },
       };
-      markerLayer?.update(shell.view, shell.expanded && view.storage !== 'loading');
+      markerLayer?.update(shell.view, !drawing && shell.expanded && view.storage !== 'loading');
     }
   };
   const message = (text: string) => {
@@ -119,7 +134,10 @@ export async function createRuntime(
     onSelect(anchor, targets) {
       if (disposed || reconcilePage() || view.storage === 'loading') return;
       editorVersion++;
-      if (view.editingId) view.draft = '';
+      if (view.editingId) {
+        view.draft = '';
+        view.images = [];
+      }
       view.editingId = null;
       view.selected = targets;
       selectionPage = capturePage();
@@ -137,7 +155,10 @@ export async function createRuntime(
         return;
       }
       editorVersion++;
-      if (view.editingId) view.draft = '';
+      if (view.editingId) {
+        view.draft = '';
+        view.images = [];
+      }
       view.editingId = null;
       view.editorOpen = false;
       view.marker = null;
@@ -170,10 +191,12 @@ export async function createRuntime(
   }
 
   function resetEditor() {
+    drawing?.abort();
     editorVersion++;
     selectionPage = null;
     view.selected = [];
     view.draft = '';
+    view.images = [];
     view.editingId = null;
     view.editorOpen = false;
     view.marker = null;
@@ -189,6 +212,7 @@ export async function createRuntime(
     view.storage = store.available ? 'ready' : 'unavailable';
     if (!view.editorOpen && !view.draft && next.draft.text && !next.draft.editorOpen) {
       view.draft = next.draft.text;
+      view.images = structuredClone(next.draft.images ?? []);
       view.message =
         'An edited annotation was deleted remotely. Its text is kept for a new selection.';
     }
@@ -196,6 +220,7 @@ export async function createRuntime(
       view.editingId &&
       !next.document.annotations.some((annotation) => annotation.id === view.editingId)
     ) {
+      drawing?.abort();
       view.editingId = null;
       view.editorOpen = false;
       view.marker = null;
@@ -208,6 +233,7 @@ export async function createRuntime(
   function snapshotDraft(): DraftRecord['draft'] {
     return {
       text: view.draft,
+      images: structuredClone(view.images),
       editingId: view.editingId,
       targets: view.editorOpen ? structuredClone(view.selected) : selection.getTargets(),
       ...(view.marker ? { marker: view.marker } : {}),
@@ -253,9 +279,9 @@ export async function createRuntime(
         : currentConnection!,
       sessionId: bound.document.id,
       read: () => store.read(key, url),
-      async apply(response) {
+      async apply(response, images) {
         if (token !== syncGeneration || disposed) return;
-        const next = await store.applySync(key, url, response);
+        const next = await store.applySync(key, url, response, images);
         if (token === syncGeneration && !disposed) accept(next);
       },
       onState(state, text) {
@@ -283,6 +309,7 @@ export async function createRuntime(
     if (token !== pageGeneration || disposed || signal.aborted) return;
     record = next;
     view.draft = next.draft.text;
+    view.images = structuredClone(next.draft.images ?? []);
     view.editingId =
       next.draft.editingId &&
       next.document.annotations.some((annotation) => annotation.id === next.draft.editingId)
@@ -343,6 +370,7 @@ export async function createRuntime(
       return;
     }
     if (action.type === 'set-picking') {
+      if (!action.value) drawing?.abort();
       pendingPicking = view.storage === 'loading' ? action.value : null;
       selection.setVisible(action.value && view.storage !== 'loading');
       selection.setPicking(action.value && view.storage !== 'loading');
@@ -371,12 +399,117 @@ export async function createRuntime(
       return;
     }
     if (!record) throw new Error('Feedback is still loading.');
+    if (
+      action.type === 'screenshot' ||
+      action.type === 'import-image' ||
+      action.type === 'edit-image'
+    ) {
+      if (drawing || saving || !view.editorOpen) return;
+      if (action.type !== 'edit-image' && view.images.length >= MAX_ANNOTATION_IMAGES)
+        throw new Error('Up to 8 images can be attached to one annotation.');
+      const lifetime = new AbortController();
+      drawing = lifetime;
+      const drawingSignal = AbortSignal.any([signal, lifetime.signal]);
+      const page = pageGeneration;
+      const version = editorVersion;
+      const previousVisibility = shell.style.visibility;
+      const restore = () => {
+        if (drawing !== lifetime) return;
+        drawing = null;
+        shell.style.visibility = previousVisibility;
+        if (!disposed && page === pageGeneration) {
+          selection.setVisible(shell.expanded);
+          selection.setPicking(shell.expanded && view.storage !== 'loading');
+          render();
+        }
+      };
+      drawingSignal.addEventListener('abort', restore, { once: true });
+      let stream: MediaStream | undefined;
+      try {
+        // Request before the lazy editor import; a later task loses browser activation.
+        const pending = action.type === 'screenshot' ? requestCapture(drawingSignal) : null;
+        selection.setPicking(false);
+        selection.setVisible(false);
+        shell.style.visibility = 'hidden';
+        render();
+        if (pending) stream = await pending;
+        drawingSignal.throwIfAborted();
+        const blob =
+          action.type === 'import-image'
+            ? action.file
+            : action.type === 'edit-image'
+              ? record.images?.[action.id]
+              : undefined;
+        if (!stream && !blob)
+          throw new Error('Image is not available locally yet. Wait for synchronization.');
+        const { createDrawingEditor } = await import('./ui/drawing');
+        drawingSignal.throwIfAborted();
+        await createDrawingEditor({
+          source: stream ? { stream } : { blob: blob! },
+          theme: view.theme,
+          signal: drawingSignal,
+          async onSave(result) {
+            const image = await describeImage(
+              result,
+              action.type === 'screenshot' ? 'screen' : 'import',
+            );
+            drawingSignal.throwIfAborted();
+            if (reconcilePage() || page !== pageGeneration || version !== editorVersion)
+              throw new Error('The annotation changed while drawing.');
+            const previous = view.images;
+            view.images =
+              action.type === 'edit-image'
+                ? previous.map((item) => (item.id === action.id ? image : item))
+                : [...previous, image];
+            try {
+              const draft = snapshotDraft();
+              const next = await store.update(pageKey, pageUrl, (current) => {
+                drawingSignal.throwIfAborted();
+                return { ...current, draft, images: { ...current.images, [image.id]: result } };
+              });
+              if (page === pageGeneration && !disposed) {
+                accept(next);
+                view.message = 'Image attached. Save the feedback to share it.';
+              }
+            } catch (error) {
+              if (page === pageGeneration && version === editorVersion && !disposed)
+                view.images = previous;
+              throw error;
+            }
+          },
+          onClose: () => lifetime.abort(),
+        });
+      } catch (error) {
+        stream?.getTracks().forEach((track) => track.stop());
+        const cancelled =
+          drawingSignal.aborted ||
+          (error instanceof DOMException && ['NotAllowedError', 'AbortError'].includes(error.name));
+        lifetime.abort();
+        if (!cancelled && page === pageGeneration) throw error;
+      }
+      return;
+    }
+    if (action.type === 'remove-image') {
+      view.images = view.images.filter((image) => image.id !== action.id);
+      editorVersion++;
+      render();
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'download-image') {
+      const blob = record.images?.[action.id];
+      if (!blob) throw new Error('Image is not available locally yet.');
+      downloads.download(blob, `${action.id}.png`);
+      return;
+    }
     if (action.type === 'copy') {
       await copy();
       return;
     }
     if (action.type === 'export') {
-      downloads.exportJson(record.document);
+      const images = record.document.annotations.flatMap((annotation) => annotation.images ?? []);
+      if (images.length) await downloads.exportImages(record.document, record.images ?? {});
+      else downloads.exportJson(record.document);
       message('Feedback exported');
       return;
     }
@@ -446,6 +579,7 @@ export async function createRuntime(
               : {}),
           status: existing?.status || 'pending',
           replies: existing?.replies || [],
+          ...(view.images.length ? { images: structuredClone(view.images) } : {}),
         });
         await mutate({ id: crypto.randomUUID(), kind: 'upsert', annotation }, submittedDraft);
         if (page === pageGeneration && version === editorVersion) {
@@ -468,6 +602,7 @@ export async function createRuntime(
       view.message = '';
       view.editingId = annotation.id;
       view.draft = annotation.comment;
+      view.images = structuredClone(annotation.images ?? []);
       view.marker = annotation.marker ?? fallbackAnchor(annotation.targets);
       view.editorOpen = true;
       view.selected = structuredClone(annotation.targets);
@@ -497,6 +632,9 @@ export async function createRuntime(
     if (disposed) return;
     preferences.destroy();
     disposed = true;
+    drawing?.abort();
+    for (const url of imageUrls.values()) URL.revokeObjectURL(url);
+    imageUrls.clear();
     pageGeneration++;
     syncGeneration++;
     clearInterval(navigation);
@@ -513,11 +651,13 @@ export async function createRuntime(
   signal.addEventListener('abort', destroy, { once: true });
   function reconcilePage() {
     if (location.href === pageUrl || disposed) return false;
+    drawing?.abort();
     pageUrl = location.href;
     pageKey = keyFor(pageUrl);
     record = null;
     view.document = null;
     view.draft = '';
+    view.images = [];
     view.editingId = null;
     view.marker = null;
     view.editorOpen = false;

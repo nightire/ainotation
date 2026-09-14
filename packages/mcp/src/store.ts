@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   AnnotationContentSchema,
@@ -11,6 +11,9 @@ import {
   type FeedbackDocument,
   type SyncRequest,
   type SyncResponse,
+  type FeedbackImage,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_PIXELS,
 } from '@ainotation/schema';
 import { z } from 'zod';
 
@@ -84,6 +87,15 @@ function documentOrigin(document: FeedbackDocument): string {
 function validateSession(session: Session): void {
   SessionSchema.parse(session);
   const ids = session.document.annotations.map((annotation) => annotation.id);
+  const images = new Map<string, FeedbackImage>();
+  for (const image of session.document.annotations.flatMap(
+    (annotation) => annotation.images ?? [],
+  )) {
+    const previous = images.get(image.id);
+    if (previous && !isDeepStrictEqual(previous, image))
+      throw new StoreError(400, 'Conflicting image attachment metadata');
+    images.set(image.id, image);
+  }
   if (
     documentOrigin(session.document) !== session.origin ||
     new Set(ids).size !== ids.length ||
@@ -101,6 +113,7 @@ function validateSession(session: Session): void {
 
 /** A synchronous memory store; use createFeedbackStore to open persistent storage. */
 export class FeedbackStore {
+  private images = new Map<string, Buffer>();
   private sessions = new Map<string, Session>();
   private queue: Promise<void> = Promise.resolve();
   private listeners = new Map<string, Set<() => void>>();
@@ -133,6 +146,67 @@ export class FeedbackStore {
     return structuredClone(session.document);
   }
 
+  image(sessionId: string, imageId: string, origin?: string): FeedbackImage {
+    z.uuid().parse(imageId);
+    const image = this.get(sessionId, origin)
+      .annotations.flatMap((annotation) => annotation.images ?? [])
+      .find((image) => image.id === imageId);
+    if (!image) throw new StoreError(404, 'Image not found in session');
+    return image;
+  }
+
+  private imagePath(sessionId: string, imageId: string): string {
+    return join(`${this.filePath}.images`, sessionId, `${imageId}.png`);
+  }
+
+  async getImage(sessionId: string, imageId: string, origin?: string): Promise<Buffer> {
+    this.image(sessionId, imageId, origin);
+    let bytes = this.images.get(`${sessionId}/${imageId}`);
+    if (!bytes && this.filePath) {
+      try {
+        bytes = await readFile(this.imagePath(sessionId, imageId));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    if (!bytes) throw new StoreError(404, 'Image has not been uploaded yet');
+    this.validateImage(bytes, this.image(sessionId, imageId, origin));
+    return Buffer.from(bytes);
+  }
+
+  private validateImage(bytes: Buffer, image: FeedbackImage) {
+    if (
+      bytes.length !== image.size ||
+      bytes.length > MAX_IMAGE_BYTES ||
+      bytes.length < 33 ||
+      bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' ||
+      bytes.toString('ascii', 12, 16) !== 'IHDR' ||
+      bytes.readUInt32BE(16) !== image.width ||
+      bytes.readUInt32BE(20) !== image.height ||
+      image.width * image.height > MAX_IMAGE_PIXELS ||
+      createHash('sha256').update(bytes).digest('hex') !== image.sha256
+    )
+      throw new StoreError(400, 'Image contents do not match attachment metadata');
+  }
+
+  async putImage(sessionId: string, imageId: string, bytes: Buffer, origin: string): Promise<void> {
+    await this.mutate(async () => {
+      const image = this.image(sessionId, imageId, origin);
+      this.validateImage(bytes, image);
+      if (this.filePath) {
+        const path = this.imagePath(sessionId, imageId);
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+        const temporary = `${path}.${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporary, bytes, { mode: 0o600, flag: 'wx' });
+          await rename(temporary, path);
+        } finally {
+          await rm(temporary, { force: true }).catch(() => {});
+        }
+      } else this.images.set(`${sessionId}/${imageId}`, Buffer.from(bytes));
+    });
+  }
+
   subscribe(sessionId: string, listener: () => void): () => void {
     this.get(sessionId);
     let listeners = this.listeners.get(sessionId);
@@ -160,6 +234,18 @@ export class FeedbackStore {
   private async commit(session: Session): Promise<void> {
     validateSession(session);
     const previous = this.sessions.get(session.document.id);
+    const previousImages = new Map(
+      previous?.document.annotations
+        .flatMap((annotation) => annotation.images ?? [])
+        .map((image) => [image.id, image]),
+    );
+    for (const image of session.document.annotations.flatMap(
+      (annotation) => annotation.images ?? [],
+    )) {
+      const old = previousImages.get(image.id);
+      if (old && !isDeepStrictEqual(old, image))
+        throw new StoreError(409, 'Use a new image ID when replacing an attachment');
+    }
     if (!previous && this.sessions.size >= MAX_SESSIONS)
       throw new StoreError(409, 'Session capacity reached');
     if (isDeepStrictEqual(previous, session)) return;
@@ -180,6 +266,20 @@ export class FeedbackStore {
       }
     }
     this.sessions = next;
+    const retained = new Set(
+      session.document.annotations
+        .flatMap((annotation) => annotation.images ?? [])
+        .map((image) => image.id),
+    );
+    for (const image of previous?.document.annotations.flatMap(
+      (annotation) => annotation.images ?? [],
+    ) ?? []) {
+      if (!retained.has(image.id)) {
+        this.images.delete(`${session.document.id}/${image.id}`);
+        if (this.filePath)
+          await rm(this.imagePath(session.document.id, image.id), { force: true }).catch(() => {});
+      }
+    }
     if (!isDeepStrictEqual(previous?.document, session.document)) {
       for (const listener of this.listeners.get(session.document.id) ?? []) {
         // Observers cannot turn a successfully persisted mutation into a failure.

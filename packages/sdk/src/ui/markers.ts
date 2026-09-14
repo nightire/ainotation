@@ -1,7 +1,7 @@
 import type { Annotation, MarkerAnchor, TargetSnapshot } from '@ainotation/schema';
 import { css, html, nothing, render } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
-import { Check, createElement, Pencil, Plus, Trash2, X } from 'lucide';
+import { Camera, ImagePlus, Download, Check, createElement, Pencil, Plus, Trash2, X } from 'lucide';
 
 import type { InspectorAction, InspectorViewState } from '../core/types';
 import { themeStyles } from './theme';
@@ -172,6 +172,18 @@ const styles = css`
     align-items: center;
     justify-content: center;
   }
+  .actions-end {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .actions .danger {
+    color: var(--ain-error);
+    border-color: var(--ain-error);
+  }
+  .actions .danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ain-error) 12%, var(--ain-surface));
+  }
   .actions svg {
     width: 16px;
     height: 16px;
@@ -180,6 +192,72 @@ const styles = css`
     margin: 8px 0 0;
     overflow-wrap: anywhere;
     color: var(--ain-message);
+  }
+  .images {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .image {
+    position: relative;
+    width: 84px;
+    height: 64px;
+  }
+  .image img {
+    width: 76px;
+    height: 56px;
+    object-fit: contain;
+    display: block;
+  }
+  .image-preview {
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 3px;
+  }
+  .image svg {
+    width: 14px;
+    height: 14px;
+  }
+  .image-action {
+    opacity: 0;
+    pointer-events: none;
+    position: absolute;
+    right: 3px;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    box-shadow: 0 1px 3px var(--ain-shadow);
+  }
+  .image-action:hover:not(:disabled) {
+    background: var(--ain-hover);
+  }
+  .image:hover .image-action,
+  .image:focus-within .image-action {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  @media (hover: none) {
+    .image-action {
+      opacity: 1;
+      pointer-events: auto;
+    }
+  }
+  .image-remove {
+    top: 3px;
+  }
+  .image-download {
+    bottom: 3px;
+  }
+  .import-hint {
+    font-size: 11px;
+    color: var(--ain-muted);
+    margin: 8px 0 0;
   }
 `;
 
@@ -460,6 +538,30 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                       class="popover"
                       role="dialog"
                       aria-label=${next.editingId ? 'Edit feedback' : 'New feedback'}
+                      @paste=${(event: ClipboardEvent) => {
+                        const file = [...(event.clipboardData?.files ?? [])].find((file) =>
+                          file.type.startsWith('image/'),
+                        );
+                        if (file) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onAction({ type: 'import-image', file });
+                        }
+                      }}
+                      @dragover=${(event: DragEvent) => {
+                        if (event.dataTransfer?.types.includes('Files')) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          event.dataTransfer.dropEffect = 'copy';
+                        }
+                      }}
+                      @drop=${(event: DragEvent) => {
+                        if (!event.dataTransfer?.files.length) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const file = event.dataTransfer.files[0];
+                        if (file) onAction({ type: 'import-image', file });
+                      }}
                       @keydown=${(event: KeyboardEvent) => {
                         if (event.key === 'Escape' && !event.isComposing) {
                           event.preventDefault();
@@ -504,40 +606,107 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         }}
                         @input=${(event: Event) => onAction({ type: 'draft', value: (event.currentTarget as HTMLTextAreaElement).value })}
                       ></textarea>
+                      <div class="images" aria-label="Attached images">
+                        ${next.images.map(
+                          (image, index) => html`<div class="image">
+                            <button
+                              class="image-preview"
+                              type="button"
+                              aria-label=${`Edit image ${index + 1}`}
+                              ?disabled=${!next.imageUrls[image.id]}
+                              @click=${() => onAction({ type: 'edit-image', id: image.id })}
+                            >
+                              ${next.imageUrls[image.id] ? html`<img src=${next.imageUrls[image.id]} alt=${`Attached image ${index + 1}`} />` : html`Image ${index + 1}`}
+                            </button>
+                            <button
+                              class="image-action image-download"
+                              type="button"
+                              aria-label=${`Download image ${index + 1}`}
+                              title="Download image"
+                              ?disabled=${!next.imageUrls[image.id]}
+                              @click=${() => onAction({ type: 'download-image', id: image.id })}
+                            >
+                              ${createElement(Download, { 'aria-hidden': 'true' })}
+                            </button>
+                            <button
+                              class="image-action image-remove"
+                              type="button"
+                              aria-label=${`Remove image ${index + 1}`}
+                              title="Remove image"
+                              @click=${() => onAction({ type: 'remove-image', id: image.id })}
+                            >
+                              ${createElement(Trash2, { 'aria-hidden': 'true' })}
+                            </button>
+                          </div>`,
+                        )}
+                      </div>
                       <div class="actions">
                         <button
                           type="button"
-                          aria-label="Cancel"
-                          title="Cancel"
-                          @click=${() => onAction({ type: 'cancel-edit' })}
+                          aria-label="Screenshot"
+                          title="Draw on this page and capture a screenshot"
+                          ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
+                          @click=${() => onAction({ type: 'screenshot' })}
                         >
-                          ${createElement(X, { 'aria-hidden': 'true', focusable: 'false' })}
+                          ${createElement(Camera, { 'aria-hidden': 'true', focusable: 'false' })}
                         </button>
                         <button
-                          class="primary"
                           type="button"
-                          aria-label=${next.editingId ? 'Save' : 'Add'}
-                          title=${`${next.editingId ? 'Save' : 'Add'} (Command/Super + Enter)`}
-                          aria-keyshortcuts="Meta+Enter"
-                          ?disabled=${!next.draft.trim() || next.saving || next.storage === 'loading'}
-                          @click=${() => onAction({ type: 'save' })}
+                          aria-label="Choose image"
+                          title="Choose image"
+                          ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
+                          @click=${() => shadow.querySelector<HTMLInputElement>('input[type=file]')?.click()}
                         >
-                          ${createElement(Check, { 'aria-hidden': 'true', focusable: 'false' })}
+                          ${createElement(ImagePlus, { 'aria-hidden': 'true', focusable: 'false' })}
                         </button>
-                        ${
-                          next.editingId
-                            ? html`<button
-                                type="button"
-                                aria-label="Delete"
-                                title="Delete"
-                                ?disabled=${next.saving}
-                                @click=${() => onAction({ type: 'delete', id: next.editingId! })}
-                              >
-                                ${createElement(Trash2, { 'aria-hidden': 'true', focusable: 'false' })}
-                              </button>`
-                            : nothing
-                        }
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          hidden
+                          @change=${(event: Event) => {
+                            const input = event.currentTarget as HTMLInputElement;
+                            const file = input.files?.[0];
+                            input.value = '';
+                            if (file) onAction({ type: 'import-image', file });
+                          }}
+                        />
+                        <div class="actions-end">
+                          <button
+                            type="button"
+                            aria-label="Cancel"
+                            title="Cancel"
+                            @click=${() => onAction({ type: 'cancel-edit' })}
+                          >
+                            ${createElement(X, { 'aria-hidden': 'true', focusable: 'false' })}
+                          </button>
+                          <button
+                            class="primary"
+                            type="button"
+                            aria-label=${next.editingId ? 'Save' : 'Add'}
+                            title=${`${next.editingId ? 'Save' : 'Add'} (Command/Super + Enter)`}
+                            aria-keyshortcuts="Meta+Enter"
+                            ?disabled=${!next.draft.trim() || next.saving || next.storage === 'loading'}
+                            @click=${() => onAction({ type: 'save' })}
+                          >
+                            ${createElement(Check, { 'aria-hidden': 'true', focusable: 'false' })}
+                          </button>
+                          ${
+                            next.editingId
+                              ? html`<button
+                                  class="danger"
+                                  type="button"
+                                  aria-label="Delete"
+                                  title="Delete"
+                                  ?disabled=${next.saving}
+                                  @click=${() => onAction({ type: 'delete', id: next.editingId! })}
+                                >
+                                  ${createElement(Trash2, { 'aria-hidden': 'true', focusable: 'false' })}
+                                </button>`
+                              : nothing
+                          }
+                        </div>
                       </div>
+                      <p class="import-hint">Paste or drop an image here</p>
                       ${next.message ? html`<p class="message" role="status">${next.message}</p>` : nothing}
                     </section>
                   `

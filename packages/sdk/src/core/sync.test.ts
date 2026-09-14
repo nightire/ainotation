@@ -131,3 +131,78 @@ it('cancels pending credential resolution when synchronization stops', async () 
     client.stop();
   }
 });
+
+it('applies feedback metadata and later deletions even while attachment bytes are unavailable', async () => {
+  vi.useFakeTimers();
+  const document = createFeedbackDocument(location.href);
+  const now = new Date().toISOString();
+  document.annotations.push({
+    id: crypto.randomUUID(),
+    comment: 'New feedback with a pending image',
+    createdAt: now,
+    updatedAt: now,
+    page: {
+      url: location.href,
+      title: 'Sync fixture',
+      viewport: { width: 800, height: 600, devicePixelRatio: 1, scrollX: 0, scrollY: 0 },
+    },
+    targets: [
+      {
+        id: crypto.randomUUID(),
+        selector: 'body',
+        tagName: 'body',
+        text: '',
+        shadowHosts: [],
+        attributes: {},
+        styles: {},
+        rect: { x: 0, y: 0, width: 800, height: 600 },
+      },
+    ],
+    images: [
+      {
+        id: crypto.randomUUID(),
+        mimeType: 'image/png',
+        source: 'import',
+        width: 1,
+        height: 1,
+        size: 4,
+        sha256: '0'.repeat(64),
+      },
+    ],
+    status: 'pending',
+    replies: [],
+  });
+  let remote = structuredClone(document);
+  const applied = vi.fn(async () => {});
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    if (init?.method === 'POST') return Response.json({ document: remote, acknowledged: [] });
+    if (typeof input === 'string' && input.includes('/images/'))
+      return new Response(null, { status: 404 });
+    return new Promise<Response>((_resolve, reject) =>
+      init?.signal?.addEventListener('abort', () => reject(new Error('Stopped')), { once: true }),
+    );
+  });
+  const client = createSyncClient({
+    connection: { endpoint: 'http://127.0.0.1:4748', token: 'test-token' },
+    sessionId: document.id,
+    read: async () => ({
+      document,
+      operations: [],
+      draft: { text: '', editingId: null, targets: [] },
+      authority: null,
+    }),
+    apply: applied,
+    onState() {},
+    onSync() {},
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(applied).toHaveBeenCalledWith({ document: remote, acknowledged: [] }, {});
+    remote = { ...remote, annotations: [] };
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(applied).toHaveBeenLastCalledWith({ document: remote, acknowledged: [] }, {});
+  } finally {
+    client.stop();
+    await vi.advanceTimersByTimeAsync(0);
+  }
+});

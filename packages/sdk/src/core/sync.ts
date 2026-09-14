@@ -1,6 +1,7 @@
 import { SyncResponseSchema } from '@ainotation/schema';
 import type { DraftRecord } from './storage';
 import type { SyncResponse } from '@ainotation/schema';
+import { syncImages } from './image-sync';
 
 export interface McpConnection {
   endpoint: string;
@@ -48,7 +49,7 @@ export function createSyncClient(options: {
   connection: McpConnection | ((signal: AbortSignal) => Promise<McpConnection>);
   sessionId: string;
   read: () => Promise<DraftRecord>;
-  apply: (response: SyncResponse) => Promise<void>;
+  apply: (response: SyncResponse, images: Record<string, Blob>) => Promise<void>;
   onState: (state: 'connecting' | 'connected' | 'error', message: string) => void;
   onSync: (syncing: boolean) => void;
 }) {
@@ -62,6 +63,7 @@ export function createSyncClient(options: {
           return async () => connection;
         })();
   let stopped = false;
+  const uploaded = new Set<string>();
   let wanted = false;
   let running: Promise<void> | undefined;
   let streaming: AbortController | undefined;
@@ -101,7 +103,18 @@ export function createSyncClient(options: {
           const data = SyncResponseSchema.parse(await response.json());
           if (data.document.id !== options.sessionId || data.document.url !== record.document.url)
             throw new Error('MCP returned another session.');
-          if (!stopped) await options.apply(data);
+          // Text/deletions must remain usable when metadata arrives before its
+          // image bytes, or an attachment transfer fails and needs a retry.
+          if (!stopped) await options.apply(data, {});
+          if (stopped) return;
+          const images = await syncImages({
+            document: data.document,
+            local: record.images ?? {},
+            connection,
+            signal: controller.signal,
+            uploaded,
+          });
+          if (!stopped && Object.keys(images).length) await options.apply(data, images);
         }
       } finally {
         running = undefined;
@@ -177,6 +190,7 @@ export function createSyncClient(options: {
           }
         }
       } catch {
+        uploaded.clear();
         if (!stopped)
           options.onState('error', 'MCP unavailable. Local feedback is retained; retrying.');
       } finally {

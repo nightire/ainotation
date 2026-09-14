@@ -9,6 +9,7 @@
 - UI：Lit + Shadow DOM；原生 CSS / CSS Variables；Lucide 图标。
 - 动画与捕获：Web Animations API、Screen Capture API 等原生浏览器能力，渐进增强。
 - 截图编辑：位图底图 + SVG 标记；Canvas 负责裁剪与图片合成。暂不引入 Konva。
+- 图片标注从 marker popover 的 Screenshot action 进入实时页面绘图，Option/Alt 临时穿透、松开恢复绘制；支持粘贴、拖入、选择 PNG/JPEG/WebP 图片。完成生成 PNG 附件，先存入当前标注草稿，随 feedback 保存。图片元数据进入反馈契约，位图使用 IndexedDB Blob 与独立的鉴权传输，不塞入 JSON 同步正文；带图导出为 JSON/Markdown/PNG 的 ZIP，MCP 通过 ainotation_get_image 按需读取。
 - 数据契约：Zod + JSON Schema；反馈文档独立于 UI、SVG 和浏览器运行时对象。
 - 本地存储：IndexedDB + idb，图片使用 Blob，不放入 localStorage。
 - 工具链：Vite+；应用使用 `vp dev` / `vp build`，SDK 与 MCP 包使用 `vp pack`。

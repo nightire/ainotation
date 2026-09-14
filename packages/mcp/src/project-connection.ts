@@ -8,6 +8,7 @@ import type { ServiceConnection } from './shared-service';
 import { ensureSharedService } from './service-discovery';
 import { serviceRequest } from './service-client';
 import { createLeaseClient, type LeaseClient } from './lease-client';
+import { readImageResponse } from './image-response';
 
 export function createProjectConnection(options: {
   resolveProject: () => Promise<ProjectInfo>;
@@ -74,6 +75,24 @@ export function createProjectConnection(options: {
   const annotationPath = (sessionId: string, annotationId: string) =>
     `${sessionPath(sessionId)}/annotations/${z.uuid().parse(annotationId)}`;
   const backend: McpFeedbackBackend = {
+    async getImage(sessionId, imageId) {
+      const path = `${sessionPath(sessionId)}/images/${z.uuid().parse(imageId)}`;
+      const { connection, client } = await lease();
+      try {
+        const response = await fetch(`${connection.service.url}${path}`, {
+          headers: { Authorization: `Bearer ${connection.grant.token}` },
+          signal: AbortSignal.any([client.signal, AbortSignal.timeout(15000)]),
+          redirect: 'error',
+          credentials: 'omit',
+        });
+        const bytes = await readImageResponse(response);
+        return { data: bytes.toString('base64'), mimeType: 'image/png' };
+      } catch (error) {
+        if (!(error instanceof StoreError) || [401, 403, 503].includes(error.status))
+          client.invalidate(connection, error);
+        throw error;
+      }
+    },
     async list() {
       return z.object({ sessions: z.array(FeedbackExportSchema) }).parse(await request('/sessions'))
         .sessions;

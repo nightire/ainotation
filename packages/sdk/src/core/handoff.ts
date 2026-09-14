@@ -1,6 +1,7 @@
 import {
   feedbackExport,
   feedbackMarkdown,
+  imageFilename,
   type FeedbackDocument,
   type OutputDetail,
 } from '@ainotation/schema';
@@ -44,25 +45,59 @@ export function createFeedbackDownloads() {
     urls.delete(url);
     URL.revokeObjectURL(url);
   };
+  const download = (blob: Blob, filename: string) => {
+    if (destroyed) throw new Error('Inspector downloads are closed.');
+    const url = URL.createObjectURL(blob);
+    urls.set(
+      url,
+      setTimeout(() => release(url), 10000),
+    );
+    try {
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+    } catch (error) {
+      release(url);
+      throw error;
+    }
+  };
   return {
+    download,
+    async exportImages(feedback: FeedbackDocument, blobs: Record<string, Blob>) {
+      const images = [
+        ...new Map(
+          feedback.annotations
+            .flatMap((annotation) => annotation.images ?? [])
+            .map((image) => [image.id, image]),
+        ).values(),
+      ];
+      const entries = images.map((image) => {
+        const blob = blobs[image.id];
+        if (!blob)
+          throw new Error(
+            'Some images are not available locally yet. Wait for synchronization before exporting.',
+          );
+        return { name: imageFilename(image), blob };
+      });
+      entries.unshift({
+        name: 'feedback.json',
+        blob: new Blob([JSON.stringify(feedbackExport(feedback), null, 2)], {
+          type: 'application/json',
+        }),
+      });
+      entries.unshift({
+        name: 'feedback.md',
+        blob: new Blob([feedbackMarkdown(feedback)], { type: 'text/markdown' }),
+      });
+      const { imageArchive } = await import('./image-archive');
+      download(await imageArchive(entries), `ainotation-${feedback.id}.zip`);
+    },
     exportJson(feedback: FeedbackDocument) {
-      if (destroyed) throw new Error('Inspector downloads are closed.');
-      const url = URL.createObjectURL(
+      download(
         new Blob([JSON.stringify(feedbackExport(feedback), null, 2)], { type: 'application/json' }),
+        `ainotation-${feedback.id}.json`,
       );
-      urls.set(
-        url,
-        setTimeout(() => release(url), 10000),
-      );
-      try {
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `ainotation-${feedback.id}.json`;
-        anchor.click();
-      } catch (error) {
-        release(url);
-        throw error;
-      }
     },
     destroy() {
       if (destroyed) return;

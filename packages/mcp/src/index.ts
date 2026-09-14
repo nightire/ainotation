@@ -50,6 +50,7 @@ export {
 } from './project';
 
 export interface McpFeedbackBackend {
+  getImage?(sessionId: string, imageId: string): Promise<{ data: string; mimeType: 'image/png' }>;
   list(): Promise<FeedbackExport[]>;
   get(sessionId: string): Promise<FeedbackExport>;
   createAnnotation(sessionId: string, input: CreateAnnotationInput): Promise<FeedbackExport>;
@@ -73,6 +74,12 @@ export function createMcpServer(
           },
           async get(sessionId) {
             return feedbackExport(store.get(sessionId));
+          },
+          async getImage(sessionId, imageId) {
+            return {
+              data: (await store.getImage(sessionId, imageId)).toString('base64'),
+              mimeType: 'image/png',
+            };
           },
           async createAnnotation(sessionId, input) {
             return feedbackExport(await store.createAnnotation(sessionId, input));
@@ -124,6 +131,28 @@ export function createMcpServer(
     (input) => respond(async () => (await forInput(input)).get(input.sessionId)),
   );
   const pair = { sessionId: z.uuid(), annotationId: z.uuid() };
+  server.registerTool(
+    'ainotation_get_image',
+    {
+      description:
+        'Read one image attachment from a feedback session. Use an image ID from an annotation; returns PNG image content.',
+      inputSchema: z.object({ ...scope, sessionId: z.uuid(), imageId: z.uuid() }).strict(),
+      annotations: readAnnotations,
+    },
+    async (input) => {
+      try {
+        const backend = await forInput(input);
+        if (!backend.getImage)
+          throw new StoreError(501, 'This backend does not support image attachments');
+        const image = await backend.getImage(input.sessionId, input.imageId);
+        return { content: [{ type: 'image' as const, ...image }] };
+      } catch (error) {
+        return respond(async () => {
+          throw error;
+        });
+      }
+    },
+  );
   const mutationAnnotations = {
     readOnlyHint: false,
     destructiveHint: false,

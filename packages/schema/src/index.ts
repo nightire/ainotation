@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { FeedbackImagesSchema, imageFilename } from './images';
+export * from './images';
 
 export const FEEDBACK_SCHEMA_VERSION = 1;
 
@@ -86,6 +88,7 @@ export const AnnotationSchema = z.object({
   page: PageSnapshotSchema,
   targets: z.array(TargetSnapshotSchema).min(1).max(20),
   marker: MarkerAnchorSchema.optional(),
+  images: FeedbackImagesSchema.optional(),
   status: AnnotationStatusSchema,
   replies: z.array(ReplySchema).max(500),
 });
@@ -214,7 +217,7 @@ export function feedbackMarkdown(
     ...(forensic ? [`Session: ${document.id}`] : []),
     ...document.annotations.map((annotation, index) =>
       detail === 'compact'
-        ? `${index + 1}. ${annotation.targets.map(compactTarget).join('; ')}\n${quote(annotation.comment)}`
+        ? `${index + 1}. ${annotation.targets.map(compactTarget).join('; ')}\n${quote(annotation.comment)}${annotation.images?.length ? `\nImages: ${annotation.images.map(imageFilename).join(', ')}` : ''}`
         : [
             `## ${index + 1}. ${options.includeConversation ? annotation.status : 'Annotation'} (${annotation.id})`,
             `Page: ${annotation.page.url}`,
@@ -234,6 +237,10 @@ export function feedbackMarkdown(
                 ]
               : []),
             quote(annotation.comment),
+            ...(annotation.images?.map(
+              (image) =>
+                `Image: ${imageFilename(image)} (${image.width} × ${image.height}); attachment ID: ${image.id}`,
+            ) ?? []),
             ...annotation.targets.map((target, targetIndex) =>
               [
                 `### Target ${targetIndex + 1}`,
