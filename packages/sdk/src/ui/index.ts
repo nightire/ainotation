@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, type PropertyValues } from 'lit';
 import { Copy, createElement, Download, Settings, Trash2, X, Sun, Moon } from 'lucide';
 import { themeStyles } from './theme';
+import { logoMark } from './logo';
 import { messages, locales, languageNames, isLocale } from '../i18n';
 import {
   TRIGGER_SIZE,
@@ -130,25 +131,39 @@ export class InspectorShell extends LitElement {
       opacity: 0.45;
       cursor: default;
     }
-    button.primary {
-      background: var(--ain-accent);
-      border-color: var(--ain-accent);
-      color: var(--ain-on-accent);
-    }
-    button.primary:hover:not(:disabled) {
-      background: var(--ain-accent-hover);
-    }
     .launcher {
       display: flex;
       width: ${TRIGGER_SIZE}px;
       height: ${TRIGGER_SIZE}px;
       padding: 0;
+      border: 0;
       border-radius: 50%;
-      font-size: 20px;
-      font-weight: 650;
+      background: var(--ain-brand-container);
+      color: var(--ain-on-brand);
       touch-action: none;
       user-select: none;
       box-shadow: 0 4px 20px var(--ain-shadow);
+    }
+    .launcher:hover:not(:disabled) {
+      background: var(--ain-brand-container);
+      box-shadow: 0 6px 24px var(--ain-shadow);
+    }
+    .brand-mark {
+      pointer-events: none;
+    }
+    .launcher .brand-mark {
+      width: 24px;
+      height: 24px;
+    }
+    .settings-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .settings-heading .brand-mark {
+      width: 20px;
+      height: 20px;
+      color: var(--ain-brand-mark);
     }
     .icon {
       width: 40px;
@@ -721,7 +736,7 @@ export class InspectorShell extends LitElement {
     `;
     return html`
       <button
-        class="launcher primary"
+        class="launcher"
         type="button"
         aria-label=${m.openInspector}
         title=${m.shortcut(m.openInspector, 'Option/Alt + Shift + A')}
@@ -735,7 +750,7 @@ export class InspectorShell extends LitElement {
         @keydown=${this.onMoveKey}
         @click=${() => this.expand(true)}
       >
-        A
+        ${logoMark}
       </button>
       <section
         id="inspector-toolbar"
@@ -817,10 +832,17 @@ export class InspectorShell extends LitElement {
         ?hidden=${!this.expanded || !this.settingsOpen}
       >
         <div class="settings-heading">
-          <h2>${m.settings}</h2>
-          <span class="connection-status" data-state=${view.connection} role="status"
-            >${connectionLabel}</span
-          >
+          <div class="settings-title">
+            ${logoMark}
+            <h2>${m.settings}</h2>
+          </div>
+          ${
+            view.localOnly
+              ? html`<span class="muted local-mode">${m.localMode}</span>`
+              : html`<span class="connection-status" data-state=${view.connection} role="status"
+                  >${connectionLabel}</span
+                >`
+          }
         </div>
         <div class="output-detail">
           <label class="detail-label" for="inspector-language">${m.language}</label>
@@ -871,74 +893,80 @@ export class InspectorShell extends LitElement {
         <p class="detail-description" id="output-detail-description">
           ${m[`${currentDetail.value}Description`]} ${m.copiedMarkdown}
         </p>
-        <p>${m.connection}</p>
         ${
-          view.managedConnection
-            ? html`<p class="muted">${view.projectName}</p>
-                <p class="muted">
-                  ${view.connection === 'connected' ? m.automaticConnected : m.automaticConnection}
-                </p>`
-            : html`
-                <p class="muted">
-                  ${view.connection === 'connected' ? m.manualConnected : m.manualConnection}
-                </p>
-                <form
-                  class="connection-form"
-                  @submit=${(event: SubmitEvent) => {
-                    event.preventDefault();
-                    if (
-                      !endpoint.trim() ||
-                      !this.token.trim() ||
-                      view.connection === 'connecting' ||
-                      view.connection === 'connected'
-                    )
-                      return;
-                    const token = this.token.trim();
-                    this.token = '';
-                    this.onaction({ type: 'connect', endpoint: endpoint.trim(), token });
-                  }}
-                >
-                  <label
-                    >${m.endpoint}<input
-                      type="url"
-                      required
-                      .value=${endpoint}
-                      placeholder="http://127.0.0.1:4748"
-                      @input=${(event: Event) => {
-                        this.endpointDraft = (event.currentTarget as HTMLInputElement).value;
-                      }}
-                  /></label>
-                  <label
-                    >${m.token}<input
-                      type="password"
-                      autocomplete="off"
-                      .value=${this.token}
-                      @input=${(event: Event) => {
-                        this.token = (event.currentTarget as HTMLInputElement).value;
-                      }}
-                  /></label>
-                  <div class="row">
-                    <button
-                      type="submit"
-                      ?disabled=${view.storage === 'loading' || !endpoint.trim() || !this.token.trim() || view.connection === 'connecting' || view.connection === 'connected'}
-                    >
-                      ${m.connect}
-                    </button>
-                    ${
-                      view.connection !== 'offline'
-                        ? html`
+          view.localOnly
+            ? html`<p class="muted local-mode-description">${m.localModeDescription}</p>`
+            : html` <p>${m.connection}</p>
+                ${
+                  view.managedConnection
+                    ? html`<p class="muted">${view.projectName}</p>
+                        <p class="muted">
+                          ${view.connection === 'connected' ? m.automaticConnected : m.automaticConnection}
+                        </p>`
+                    : html`
+                        <p class="muted">
+                          ${view.connection === 'connected' ? m.manualConnected : m.manualConnection}
+                        </p>
+                        <form
+                          class="connection-form"
+                          @submit=${(event: SubmitEvent) => {
+                            event.preventDefault();
+                            if (
+                              !endpoint.trim() ||
+                              !this.token.trim() ||
+                              view.connection === 'connecting' ||
+                              view.connection === 'connected'
+                            )
+                              return;
+                            const token = this.token.trim();
+                            this.token = '';
+                            this.onaction({ type: 'connect', endpoint: endpoint.trim(), token });
+                          }}
+                        >
+                          <label
+                            >${m.endpoint}<input
+                              type="url"
+                              required
+                              .value=${endpoint}
+                              placeholder="http://127.0.0.1:4748"
+                              @input=${(event: Event) => {
+                                this.endpointDraft = (
+                                  event.currentTarget as HTMLInputElement
+                                ).value;
+                              }}
+                          /></label>
+                          <label
+                            >${m.token}<input
+                              type="password"
+                              autocomplete="off"
+                              .value=${this.token}
+                              @input=${(event: Event) => {
+                                this.token = (event.currentTarget as HTMLInputElement).value;
+                              }}
+                          /></label>
+                          <div class="row">
                             <button
-                              type="button"
-                              @click=${() => this.onaction({ type: 'disconnect' })}
+                              type="submit"
+                              ?disabled=${view.storage === 'loading' || !endpoint.trim() || !this.token.trim() || view.connection === 'connecting' || view.connection === 'connected'}
                             >
-                              ${m.disconnect}
+                              ${m.connect}
                             </button>
-                          `
-                        : nothing
-                    }
-                  </div>
-                </form>
-              `
+                            ${
+                              view.connection !== 'offline'
+                                ? html`
+                                    <button
+                                      type="button"
+                                      @click=${() => this.onaction({ type: 'disconnect' })}
+                                    >
+                                      ${m.disconnect}
+                                    </button>
+                                  `
+                                : nothing
+                            }
+                          </div>
+                        </form>
+                      `
+                }`
         }
       </section>
       <div

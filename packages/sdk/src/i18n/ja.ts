@@ -45,6 +45,9 @@ export const ja = {
   shortcut: (label: string, key: string) => `${label}（${key}）`,
   switchTheme: (name: string) => `${name}テーマに切り替え`,
   connection: 'MCP 接続',
+  localMode: 'ローカルのみ',
+  localModeDescription:
+    'フィードバックはこのブラウザーに保存されます。コピーまたはエクスポートして共有できます。',
   automaticConnected: '開発サーバー経由で接続済みです。',
   automaticConnection: '開発サーバー経由で自動接続します。',
   manualConnected: 'ローカル MCP サーバーに接続し、フィードバックを同期しています。',

@@ -31,7 +31,7 @@ import {
 
 export async function createRuntime(
   shell: InspectorShell,
-  options: { projectId?: string; mcp?: McpConnection; development?: DevelopmentConnection },
+  options: { projectId?: string; mcp?: McpConnection | false; development?: DevelopmentConnection },
   signal: AbortSignal,
 ) {
   const view = emptyViewState();
@@ -41,12 +41,17 @@ export async function createRuntime(
   let record: DraftRecord | null = null;
   let pageUrl = location.href;
   const project = options.projectId || location.origin;
+  const localOnly = options.mcp === false;
+  if (localOnly && options.development)
+    throw new Error('Local-only mode (mcp: false) cannot use a development bridge.');
   if (options.development && options.mcp)
     throw new Error('Choose either a development bridge or a manual MCP connection.');
   const development = options.development
     ? developmentBridge(options.development, project, signal)
     : undefined;
   view.managedConnection = !!development;
+  view.localOnly = localOnly;
+  if (localOnly) view.endpoint = '';
   view.projectName = options.development?.projectName ?? '';
   const keyFor = (url: string) => JSON.stringify([project, url]);
   let pageKey = keyFor(pageUrl);
@@ -276,7 +281,7 @@ export async function createRuntime(
     sync?.stop();
     sync = undefined;
     const token = ++syncGeneration;
-    if (!record || (!connection && !development) || disposed) return;
+    if (localOnly || !record || (!connection && !development) || disposed) return;
     const key = pageKey;
     const url = pageUrl;
     const currentConnection = connection;
@@ -344,6 +349,7 @@ export async function createRuntime(
     await startSync();
   }
   function disconnect() {
+    if (localOnly) return;
     sync?.stop();
     sync = undefined;
     connection = null;
@@ -358,6 +364,7 @@ export async function createRuntime(
     message(msg('localOnly'));
   }
   async function connect(value: McpConnection) {
+    if (localOnly) return;
     connection = normalizeConnection(value);
     view.endpoint = connection.endpoint;
     try {
@@ -690,8 +697,8 @@ export async function createRuntime(
     return true;
   }
   try {
-    if (development) {
-      /* The development server owns ephemeral credentials. */
+    if (localOnly || development) {
+      /* Local-only instances never restore credentials; development owns its own. */
     } else if (options.mcp) connection = normalizeConnection(options.mcp);
     else {
       const saved = sessionStorage.getItem(credentialsKey);

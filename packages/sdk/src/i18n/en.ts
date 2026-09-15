@@ -43,6 +43,8 @@ export const en = {
   shortcut: (label: string, key: string) => `${label} (${key})`,
   switchTheme: (name: string) => `Switch to ${name.toLowerCase()} mode`,
   connection: 'MCP connection',
+  localMode: 'Local only',
+  localModeDescription: 'Feedback stays in this browser. Copy or export it to share.',
   automaticConnected: 'Connected through the development server.',
   automaticConnection: 'Automatic connection through the development server.',
   manualConnected: 'Feedback sync is connected to the local MCP server.',

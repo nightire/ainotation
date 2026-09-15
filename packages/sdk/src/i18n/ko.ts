@@ -45,6 +45,9 @@ export const ko = {
   shortcut: (label: string, key: string) => `${label} (${key})`,
   switchTheme: (name: string) => `${name} 테마로 전환`,
   connection: 'MCP 연결',
+  localMode: '로컬 전용',
+  localModeDescription:
+    '피드백은 현재 브라우저에 저장됩니다. 복사하거나 내보내서 공유할 수 있습니다.',
   automaticConnected: '개발 서버를 통해 연결되었습니다.',
   automaticConnection: '개발 서버를 통해 자동으로 연결합니다.',
   manualConnected: '로컬 MCP 서버에 연결하여 피드백을 동기화합니다.',

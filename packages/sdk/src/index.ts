@@ -10,7 +10,8 @@ export interface AinotationOptions {
   container?: HTMLElement;
   onDestroy?: () => void;
   projectId?: string;
-  mcp?: McpConnection;
+  /** false disables MCP, including saved credentials, sync and connection controls. */
+  mcp?: McpConnection | false;
   development?: DevelopmentConnection;
 }
 

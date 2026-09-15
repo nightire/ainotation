@@ -163,6 +163,8 @@ await inspector.mount();
 
 集成卸载时调用 `inspector.destroy()`。`getDocument()` 返回当前反馈快照，`copyFeedback()` 将项目内已保存的反馈复制为 Markdown。手动接入时，由宿主应用负责将工具限制在开发环境；Vite 插件会自动处理这一点。
 
+传入 `mcp: false` 可创建仅本地实例：关闭 MCP 连接界面、凭据恢复和同步，标注、复制和导出仍可使用。该选项不能与 `development` 同时设置；不传入时保留现有连接行为。
+
 </details>
 
 ## 参与贡献

@@ -59,6 +59,7 @@ export interface InspectorViewState {
   theme: InspectorTheme;
   locale: Locale;
   managedConnection: boolean;
+  localOnly: boolean;
   projectName: string;
   images: FeedbackImage[];
   imageUrls: Record<string, string>;
@@ -100,6 +101,7 @@ export function emptyViewState(): InspectorViewState {
     theme: 'light',
     locale: 'en',
     managedConnection: false,
+    localOnly: false,
     projectName: '',
     images: [],
     imageUrls: {},

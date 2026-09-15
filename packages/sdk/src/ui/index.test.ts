@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import { emptyViewState, type InspectorAction, type InspectorViewState } from '../core/types';
 import { InspectorShell, registerInspectorShell } from './index';
+import { locales, messages } from '../i18n';
 
 const annotation: Annotation = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -112,7 +113,7 @@ function actionsFrom(shell: InspectorShell) {
 }
 
 async function openSettings(shell: InspectorShell) {
-  control<HTMLButtonElement>(shell, '[aria-label="Settings"]').click();
+  control<HTMLButtonElement>(shell, '[data-command="settings"]').click();
   await shell.updateComplete;
 }
 
@@ -380,13 +381,13 @@ describe('Inspector shell', () => {
     expect(actions).toEqual([]);
   });
 
-  it('defaults to a 48px circular launcher without an invisible panel hit area', async () => {
+  it('defaults to a 48px circular logo launcher without an invisible panel hit area', async () => {
     const shell = await mount({}, false);
     const launcher = control<HTMLButtonElement>(shell, '.launcher');
     const panel = control<HTMLElement>(shell, '.toolbar');
     expect(shell.expanded).toBe(false);
     expect(shell.hasAttribute('expanded')).toBe(false);
-    expect(launcher.textContent?.trim()).toBe('A');
+    expect(launcher.querySelector('svg.brand-mark')?.getAttribute('aria-hidden')).toBe('true');
     expect(launcher.getAttribute('aria-label')).toBe('Open inspector');
     expect(launcher.getAttribute('aria-expanded')).toBe('false');
     expect(launcher.getAttribute('aria-controls')).toBe(panel.id);
@@ -869,6 +870,26 @@ describe('Inspector shell', () => {
     }
     expect(actions).toEqual([]);
   });
+
+  it.each(locales)(
+    'shows local-only settings in %s without MCP status or controls',
+    async (locale) => {
+      const shell = await mount({ localOnly: true, locale });
+      await openSettings(shell);
+      const m = messages(locale);
+      expect(control(shell, '.local-mode').textContent).toBe(m.localMode);
+      expect(control(shell, '.local-mode-description').textContent).toBe(m.localModeDescription);
+      expect(shell.shadowRoot?.querySelector('.connection-status')).toBeNull();
+      expect(shell.shadowRoot?.querySelector('.connection-form')).toBeNull();
+      expect(
+        shell.shadowRoot?.querySelector('input[type="url"], input[type="password"]'),
+      ).toBeNull();
+      expect(shell.shadowRoot?.textContent).not.toContain(m.connection);
+      expect(control(shell, '#inspector-theme')).toBeTruthy();
+      expect(control(shell, '#inspector-language')).toBeTruthy();
+      expect(control(shell, '#output-detail')).toBeTruthy();
+    },
+  );
 
   it('keeps tokens local and reports server transport connection', async () => {
     const shell = await mount({ document: null });

@@ -48,7 +48,7 @@ describe('SDK lifecycle', () => {
       'Ainotation inspector',
     );
     expect(shell.expanded).toBe(false);
-    expect(shell.shadowRoot?.querySelector('.launcher')?.textContent?.trim()).toBe('A');
+    expect(shell.shadowRoot?.querySelector('.launcher svg.brand-mark')).not.toBeNull();
     expect(shell.getBoundingClientRect().width).toBe(48);
     expect(shell.getBoundingClientRect().height).toBe(48);
     expect(shell.view.picking).toBe(false);

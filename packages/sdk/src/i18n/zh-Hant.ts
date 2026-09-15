@@ -45,6 +45,8 @@ export const zhHant = {
   shortcut: (label: string, key: string) => `${label}（${key}）`,
   switchTheme: (name: string) => `切換至${name}主題`,
   connection: 'MCP 連線',
+  localMode: '僅本機',
+  localModeDescription: '回饋儲存在目前的瀏覽器中，可透過複製或匯出分享。',
   automaticConnected: '已透過開發伺服器連線。',
   automaticConnection: '透過開發伺服器自動連線。',
   manualConnected: '回饋已連接至本機 MCP 伺服器進行同步。',

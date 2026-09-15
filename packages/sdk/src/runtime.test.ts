@@ -57,9 +57,9 @@ async function selectMultiple(shell: InspectorShell, buttons: HTMLButtonElement[
   });
 }
 
-async function setup() {
-  const projectId = crypto.randomUUID();
-  const instance = createAinotation({ projectId });
+async function setup(options: Parameters<typeof createAinotation>[0] = {}) {
+  const projectId = options.projectId ?? crypto.randomUUID();
+  const instance = createAinotation({ ...options, projectId });
   instances.push(instance);
   const fixture = document.createElement('div');
   fixture.id = `fixture-${projectId}`;
@@ -133,6 +133,175 @@ afterEach(async () => {
 });
 
 describe('mounted feedback runtime', () => {
+  it('keeps local-only feedback and images usable without restoring or changing MCP credentials', async () => {
+    const projectId = crypto.randomUUID();
+    const credentialsKey = `ainotation:mcp:${projectId}`;
+    const credentials = { endpoint: 'http://127.0.0.1:4748', token: 'saved-test-token' };
+    const storedCredentials = JSON.stringify(credentials);
+    sessionStorage.setItem(credentialsKey, storedCredentials);
+    const originalUrl = location.href;
+    const originalGet = sessionStorage.getItem.bind(sessionStorage);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+    const fetch = vi
+      .spyOn(window, 'fetch')
+      .mockImplementation(async () => new Response(null, { status: 503 }));
+    const clipboard = vi.spyOn(navigator.clipboard, 'write').mockResolvedValue();
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    const createUrl = vi.spyOn(URL, 'createObjectURL');
+    try {
+      const { instance, shell, buttons, read, pageKeys } = await setup({ projectId, mcp: false });
+      expect(shell.view).toMatchObject({
+        localOnly: true,
+        managedConnection: false,
+        endpoint: '',
+        connection: 'offline',
+        syncing: false,
+      });
+      action(shell, { type: 'connect', ...credentials });
+      action(shell, { type: 'disconnect' });
+      select(buttons[0]!);
+      await save(shell, 'Local feedback');
+      const annotation = instance.getDocument()!.annotations[0]!;
+      action(shell, { type: 'edit', id: annotation.id });
+      await save(shell, 'Updated local feedback');
+      expect(await instance.copyFeedback()).toContain('Updated local feedback');
+      expect(clipboard).toHaveBeenCalledOnce();
+      action(shell, { type: 'export' });
+      await vi.waitFor(() => expect(download).toHaveBeenCalledOnce());
+      const json = createUrl.mock.calls.at(-1)![0] as Blob;
+      expect(await json.text()).toContain('Updated local feedback');
+
+      // Exercise a real image attachment, then the ZIP export, with MCP disabled.
+      action(shell, { type: 'edit', id: annotation.id });
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 16;
+      canvas.getContext('2d')!.fillRect(0, 0, 16, 16);
+      const png = await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob!)));
+      action(shell, {
+        type: 'import-image',
+        file: new File([png], 'local.png', { type: 'image/png' }),
+      });
+      await vi.waitFor(() => {
+        const attach = document
+          .querySelector('[data-ainotation-ui="drawing"]')
+          ?.shadowRoot?.querySelector<HTMLButtonElement>('[aria-label="Attach image"]');
+        expect(attach).toBeTruthy();
+      });
+      document
+        .querySelector('[data-ainotation-ui="drawing"]')!
+        .shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Attach image"]')!
+        .click();
+      await vi.waitFor(() => expect(shell.view.images).toHaveLength(1));
+      await save(shell, 'Local feedback with an image');
+      const image = instance.getDocument()!.annotations[0]!.images![0]!;
+      expect((await read())?.images?.[image.id]).toBeInstanceOf(Blob);
+      action(shell, { type: 'export' });
+      await vi.waitFor(() => expect(download).toHaveBeenCalledTimes(2));
+      const zip = createUrl.mock.calls.at(-1)![0] as Blob;
+      expect(new Uint8Array(await zip.slice(0, 2).arrayBuffer())).toEqual(new Uint8Array([80, 75]));
+
+      const saved = instance.getDocument();
+      const nextUrl = new URL(originalUrl);
+      nextUrl.hash = `local-${projectId}`;
+      pageKeys.push(JSON.stringify([projectId, nextUrl.href]));
+      history.replaceState(null, '', nextUrl.href);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await vi.waitFor(() => expect(shell.view.document?.url).toBe(nextUrl.href));
+      history.replaceState(null, '', originalUrl);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await vi.waitFor(() => expect(instance.getDocument()).toEqual(saved));
+      instance.destroy();
+      await instance.mount();
+      const restored = document.querySelector('ainotation-inspector-shell')!;
+      expect(instance.getDocument()).toEqual(saved);
+      expect(restored.view).toMatchObject({
+        localOnly: true,
+        connection: 'offline',
+        syncing: false,
+      });
+      action(restored, {
+        type: 'connect',
+        endpoint: 'http://127.0.0.1:4749',
+        token: 'new-test-token',
+      });
+      action(restored, { type: 'delete', id: annotation.id });
+      await vi.waitFor(async () => expect((await read())?.document.annotations).toEqual([]));
+      expect(fetch).not.toHaveBeenCalled();
+      expect(getItem).not.toHaveBeenCalledWith(credentialsKey);
+      expect(setItem.mock.calls.some(([key]) => key === credentialsKey)).toBe(false);
+      expect(removeItem).not.toHaveBeenCalledWith(credentialsKey);
+      expect(originalGet(credentialsKey)).toBe(storedCredentials);
+    } finally {
+      history.replaceState(null, '', originalUrl);
+      sessionStorage.removeItem(credentialsKey);
+    }
+  });
+
+  it('ignores malformed saved MCP credentials in local-only mode', async () => {
+    const projectId = crypto.randomUUID();
+    const key = `ainotation:mcp:${projectId}`;
+    sessionStorage.setItem(key, '{invalid');
+    try {
+      const { shell } = await setup({ projectId, mcp: false });
+      expect(shell.view.localOnly).toBe(true);
+      expect(shell.view.message).toBe('');
+      expect(sessionStorage.getItem(key)).toBe('{invalid');
+    } finally {
+      sessionStorage.removeItem(key);
+    }
+  });
+
+  it.each(['saved', 'explicit'] as const)(
+    'retains %s manual MCP connections when local-only mode is not enabled',
+    async (source) => {
+      const projectId = crypto.randomUUID();
+      const key = `ainotation:mcp:${projectId}`;
+      const saved = { endpoint: 'http://127.0.0.1:4748', token: 'saved-test-token' };
+      const explicit = { endpoint: 'http://127.0.0.1:4749', token: 'explicit-test-token' };
+      sessionStorage.setItem(key, JSON.stringify(saved));
+      const fetch = vi
+        .spyOn(window, 'fetch')
+        .mockImplementation(async () => new Response(null, { status: 503 }));
+      try {
+        const { shell } = await setup({
+          projectId,
+          ...(source === 'explicit' ? { mcp: explicit } : {}),
+        });
+        const connection = source === 'explicit' ? explicit : saved;
+        await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+        expect(shell.view.localOnly).toBe(false);
+        expect(shell.view.endpoint).toBe(connection.endpoint);
+        expect(
+          fetch.mock.calls.some(
+            ([url, init]) =>
+              (typeof url === 'string' ? url : url instanceof URL ? url.href : url.url).startsWith(
+                `${connection.endpoint}/sessions/`,
+              ) && new Headers(init?.headers).get('Authorization') === `Bearer ${connection.token}`,
+          ),
+        ).toBe(true);
+      } finally {
+        sessionStorage.removeItem(key);
+      }
+    },
+  );
+
+  it('rejects combining a development bridge with local-only mode before connecting', async () => {
+    const fetch = vi.spyOn(window, 'fetch');
+    const instance = createAinotation({
+      mcp: false,
+      development: { bridge: '/__ainotation', projectName: 'test' },
+    });
+    instances.push(instance);
+    await expect(instance.mount()).rejects.toThrow(
+      'Local-only mode (mcp: false) cannot use a development bridge.',
+    );
+    expect(instance.mounted).toBe(false);
+    expect(document.querySelector('ainotation-inspector-shell')).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('clears all saved markers and an active draft through the toolbar and persists the result', async () => {
     const { shell, buttons, read } = await setup();
     select(buttons[0]!);

@@ -45,6 +45,8 @@ export const zhHans = {
   shortcut: (label: string, key: string) => `${label}（${key}）`,
   switchTheme: (name: string) => `切换到${name}主题`,
   connection: 'MCP 连接',
+  localMode: '仅本地',
+  localModeDescription: '反馈保存在当前浏览器中，可通过复制或导出分享。',
   automaticConnected: '已通过开发服务器连接。',
   automaticConnection: '通过开发服务器自动连接。',
   manualConnected: '反馈已连接到本地 MCP 服务器进行同步。',

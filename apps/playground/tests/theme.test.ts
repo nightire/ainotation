@@ -30,6 +30,16 @@ it('switches all Inspector surfaces, preserves feedback and restores theme after
     };
     await mount();
     expect(await shell.getAttribute('data-theme')).toBe('light');
+    const launcher = shell.locator('.launcher');
+    expect(await launcher.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
+      'rgb(0, 71, 62)',
+    );
+    expect(await launcher.locator('.brand-mark').evaluate((el) => getComputedStyle(el).color)).toBe(
+      'rgb(250, 174, 43)',
+    );
+    await launcher.screenshot({
+      path: resolve(import.meta.dirname, '../../../output/playwright/logo-launcher-light.png'),
+    });
     const pageBackground = await page
       .locator('html')
       .evaluate((el) => getComputedStyle(el).backgroundColor);
@@ -112,6 +122,15 @@ it('switches all Inspector surfaces, preserves feedback and restores theme after
     await page.keyboard.up('Alt');
     await mount();
     await expect.poll(() => shell.getAttribute('data-theme')).toBe('dark');
+    expect(await launcher.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
+      'rgb(226, 236, 231)',
+    );
+    expect(await launcher.locator('.brand-mark').evaluate((el) => getComputedStyle(el).color)).toBe(
+      'rgb(0, 71, 62)',
+    );
+    await launcher.screenshot({
+      path: resolve(import.meta.dirname, '../../../output/playwright/logo-launcher-dark.png'),
+    });
     await shell.getByRole('button', { name: 'Open inspector', exact: true }).click();
     await markers.getByRole('button', { name: 'Edit annotation 1', exact: true }).click();
     expect(await editor.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(darkSurface);

@@ -163,6 +163,8 @@ await inspector.mount();
 
 Call `inspector.destroy()` when your integration is disposed. `getDocument()` returns the current feedback snapshot; `copyFeedback()` copies saved project feedback as Markdown. For manual integration, your app is responsible for restricting the tool to development. The Vite plugin handles this automatically.
 
+Pass `mcp: false` to create a local-only instance: MCP connection controls, saved-credential restoration and synchronization are disabled, while annotations, copying and exporting remain available. This option cannot be combined with `development`; omitting it preserves existing connection behavior.
+
 </details>
 
 ## Contributing

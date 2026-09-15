@@ -9,6 +9,9 @@ export const themeStyles = css`
     --ain-surface-muted: #e2ece7;
     --ain-field: #fffffe;
     --ain-text: #00473e;
+    --ain-brand-mark: #00473e;
+    --ain-brand-container: #00473e;
+    --ain-on-brand: #faae2b;
     --ain-muted: #475d5b;
     --ain-border: #b9cdc4;
     --ain-field-border: #77948a;
@@ -42,6 +45,9 @@ export const themeStyles = css`
     --ain-surface-muted: #001e1d;
     --ain-field: #003532;
     --ain-text: #fffffe;
+    --ain-brand-mark: #f9bc60;
+    --ain-brand-container: #e2ece7;
+    --ain-on-brand: #00473e;
     --ain-muted: #abd1c6;
     --ain-border: #376f68;
     --ain-field-border: #7baba0;
