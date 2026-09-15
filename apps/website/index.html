@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2f7f5" />
+    <title>Ainotation — A note. In its place.</title>
+    <meta
+      name="description"
+      content="A working surface for UI feedback. Point to an element, draw what you mean, and pass the context to your coding agent."
+    />
+    <meta property="og:title" content="Ainotation — A note. In its place." />
+    <meta
+      property="og:description"
+      content="Visual feedback, attached to the interface. For you and your coding agent."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://nightire.github.io/ainotation/" />
+    <link rel="canonical" href="https://nightire.github.io/ainotation/" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png" />
+    <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg" />
+    <script>
+      let initialTheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      try {
+        const preference = localStorage.getItem('ainotation.website.theme');
+        if (preference === 'light' || preference === 'dark') initialTheme = preference;
+      } catch {
+        /* System theme remains available without storage. */
+      }
+      document.documentElement.dataset.theme = initialTheme;
+      document.querySelector('meta[name="theme-color"]').content =
+        initialTheme === 'dark' ? '#004643' : '#f2f7f5';
+    </script>
+  </head>
+  <body>
+    <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-6-6 6 6-6 6" /></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10" /></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect x="8" y="8" width="12" height="13" rx="2" />
+        <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></symbol>
+      <symbol id="i-cursor" viewBox="0 0 24 24"><path d="m4 3 6 18 3-8 8-3Z" /></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" />
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24">
+        <path d="M20 15A8.5 8.5 0 0 1 9 4a8.5 8.5 0 1 0 11 11Z" />
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6" /></symbol>
+    </svg>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+    <aside class="page-margin" aria-hidden="true">
+      <span class="registration">＋</span><span class="margin-type">AINOTATION / FIELD NOTES</span
+      ><span class="margin-progress"><i></i></span><span class="registration">＋</span>
+    </aside>
+    <div class="sheet">
+      <header class="site-header">
+        <a class="brand" href="#" aria-label="Ainotation home"
+          ><span class="brand-mark" aria-hidden="true"
+            ><img class="logo-light" src="/logo.svg" width="32" height="32" alt="" /><img
+              class="logo-dark"
+              src="/logo-gold.svg"
+              width="32"
+              height="32"
+              alt="" /></span
+          >Ainotation</a
+        >
+        <span class="edition" data-i18n="edition">Tools for seeing things clearly.</span>
+        <div class="header-actions">
+          <button id="language-toggle" type="button" aria-label="切换到中文">中文</button
+          ><button id="theme-toggle" type="button" aria-label="Switch to dark mode">
+            <svg class="icon moon" aria-hidden="true"><use href="#i-moon" /></svg
+            ><svg class="icon sun" aria-hidden="true"><use href="#i-sun" /></svg></button
+          ><a href="https://github.com/nightire/ainotation"
+            >GitHub <span aria-hidden="true">↗</span></a
+          >
+        </div>
+      </header>
+      <main id="main">
+        <section class="opening" aria-labelledby="hero-title">
+          <p class="folio">
+            <span>FIG. 01—03</span
+            ><span data-i18n="eyebrow">UI feedback, in its natural habitat</span>
+          </p>
+          <h1 id="hero-title">
+            <span class="title-first" data-i18n="heroLine1">A note.</span><br /><span
+              class="title-second"
+              data-i18n="heroLine2"
+              >In its place.</span
+            ><span class="title-star" aria-hidden="true">✳</span>
+          </h1>
+          <div class="opening-aside">
+            <span class="pencil-label" data-i18n="marginNote"
+              >attach the thought<br />to the thing.</span
+            >
+            <p data-i18n="heroDescription">
+              Ainotation lets you leave feedback on the actual interface. The element, the image,
+              the intention—together, ready for your coding agent.
+            </p>
+            <button id="try-demo" type="button" class="try-button">
+              <svg class="icon" aria-hidden="true"><use href="#i-cursor" /></svg
+              ><span data-i18n="tryDemo">Make a note on this page</span
+              ><span aria-hidden="true">↗</span></button
+            ><a class="quiet-link" href="#start" data-i18n="startFree"
+              >Or, take it into your app ↓</a
+            >
+          </div>
+        </section>
+
+        <section class="proof" id="how" aria-label="Interactive product preview">
+          <div class="proof-caption">
+            <span class="section-index">01 /</span
+            ><span data-i18n="previewLabel">A small working example</span
+            ><span class="caption-right" data-i18n="previewPrompt"
+              >Change the view. Follow the note.</span
+            >
+          </div>
+          <div id="product-preview" data-mode="select">
+            <div class="preview-controls" role="tablist" aria-label="Explore the workflow">
+              <button
+                id="tab-select"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="preview-panel"
+                data-preview="select"
+              >
+                <span>①</span><span data-i18n="previewSelect">The element</span></button
+              ><button
+                id="tab-draw"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="preview-panel"
+                tabindex="-1"
+                data-preview="draw"
+              >
+                <span>②</span><span data-i18n="previewDraw">The mark</span></button
+              ><button
+                id="tab-handoff"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="preview-panel"
+                tabindex="-1"
+                data-preview="handoff"
+              >
+                <span>③</span><span data-i18n="previewHandoff">The handoff</span>
+              </button>
+            </div>
+            <div
+              id="preview-panel"
+              class="proof-stage"
+              role="tabpanel"
+              aria-labelledby="tab-select"
+            >
+              <div class="specimen">
+                <div class="specimen-top">
+                  <span data-i18n="sampleLabel">A fragment of your interface</span
+                  ><span aria-hidden="true">↙</span>
+                </div>
+                <p class="specimen-title" data-i18n="sampleTitle">Room for<br />one more idea.</p>
+                <div class="specimen-bottom">
+                  <p data-i18n="sampleBody">A work in progress.<br />A detail worth discussing.</p>
+                  <button id="preview-target" type="button">
+                    <span data-i18n="sampleButton">Invite someone</span
+                    ><span aria-hidden="true">↗</span
+                    ><span class="annotation-marker" aria-hidden="true">1</span>
+                  </button>
+                </div>
+              </div>
+              <aside class="annotation-note">
+                <span class="note-pin" aria-hidden="true">1</span
+                ><span class="note-caption" data-i18n="noteHeading">In the margin</span>
+                <p id="preview-note" data-i18n="noteSelect">
+                  Give this button a little more breathing room.
+                </p>
+                <div class="note-context">
+                  <span class="context-dot"></span
+                  ><span data-i18n="noteContext">The exact element comes along.</span>
+                </div>
+                <code>#invite-button</code>
+              </aside>
+              <svg
+                class="draw-overlay"
+                viewBox="0 0 1000 400"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <path class="draw-arrow" />
+                <path class="draw-circle" />
+              </svg>
+              <div class="handoff-card" hidden>
+                <span class="receipt-heading"
+                  ><svg class="icon" aria-hidden="true"><use href="#i-check" /></svg
+                  ><span data-i18n="handoffEyebrow">A brief your agent can use</span></span
+                >
+                <h2 data-i18n="handoffTitle">One note.<br />All the context.</h2>
+                <dl>
+                  <div>
+                    <dt data-i18n="handoffFeedback">Feedback</dt>
+                    <dd data-i18n="handoffFeedbackValue">More space around this action</dd>
+                  </div>
+                  <div>
+                    <dt data-i18n="handoffElement">Element</dt>
+                    <dd><code>#invite-button</code></dd>
+                  </div>
+                  <div>
+                    <dt data-i18n="handoffContext">Context</dt>
+                    <dd data-i18n="handoffContextValue">Page, position & styles</dd>
+                  </div>
+                  <div>
+                    <dt data-i18n="handoffImage">Reference</dt>
+                    <dd>annotation.png</dd>
+                  </div>
+                </dl>
+                <p class="receipt-foot" data-i18n="receiptFoot">
+                  Available through MCP. Or export it yourself.
+                </p>
+              </div>
+            </div>
+          </div>
+          <p class="proof-foot">
+            <span aria-hidden="true">↳</span
+            ><span data-i18n="proofFoot"
+              >An illustrative preview. The “Make a note” button opens the real tool.</span
+            >
+          </p>
+        </section>
+
+        <section class="observations" aria-labelledby="observations-title">
+          <div class="section-intro">
+            <p class="folio">
+              <span>02 /</span><span data-i18n="howEyebrow">Notes on a better back-and-forth</span>
+            </p>
+            <h2 id="observations-title" data-i18n="howTitle">Stay with<br />the interface.</h2>
+            <p class="side-note" data-i18n="howDescription">
+              A useful comment has a place.<br />And sometimes, an arrow.
+            </p>
+          </div>
+          <div class="observation-list">
+            <article>
+              <span class="observation-symbol" aria-hidden="true">⌖</span>
+              <div>
+                <h3 data-i18n="feature1Title">Point, instead of locating.</h3>
+                <p data-i18n="feature1Body">
+                  Select an element or a passage of text. Your feedback carries its location and DOM
+                  context, so the agent can find what you mean.
+                </p>
+              </div>
+              <span class="row-index">01</span>
+            </article>
+            <article>
+              <span class="observation-symbol pen-symbol" aria-hidden="true">↝</span>
+              <div>
+                <h3 data-i18n="feature2Title">Leave a visual instruction.</h3>
+                <p data-i18n="feature2Body">
+                  Draw, move, rotate, crop. Bring an existing screenshot. Hold Option / Alt to open
+                  that menu before marking it up.
+                </p>
+              </div>
+              <span class="row-index">02</span>
+            </article>
+            <article>
+              <span class="observation-symbol" aria-hidden="true">↗</span>
+              <div>
+                <h3 data-i18n="feature3Title">Pass on something usable.</h3>
+                <p data-i18n="feature3Body">
+                  Your agent reads notes and images through MCP. Or copy Markdown and export
+                  attachments for your own workflow.
+                </p>
+              </div>
+              <span class="row-index">03</span>
+            </article>
+          </div>
+        </section>
+
+        <section class="installation" id="start" aria-labelledby="start-title">
+          <div class="installation-heading">
+            <p class="folio">
+              <span>03 /</span><span data-i18n="startEyebrow">Put it to work</span>
+            </p>
+            <h2 id="start-title" data-i18n="startTitle">Add to<br />your practice.</h2>
+            <p data-i18n="startDescription">Two small additions.<br />Then back to your page.</p>
+            <span class="requirements" data-i18n="requirements"
+              >Vite 7/8 or Vite+<br />Node.js 24.20+ (24.x)</span
+            >
+            <div class="install-stamp">
+              <span data-i18n="stamp">DEVELOPMENT<br />USE</span><span aria-hidden="true">↗</span>
+            </div>
+          </div>
+          <div class="setup-steps">
+            <article class="setup-step">
+              <header>
+                <span class="step-number">a.</span>
+                <h3 data-i18n="installTitle">Your application</h3>
+              </header>
+              <div class="install-command">
+                <code id="install-code">pnpm add -D @ainotation/vite@beta</code
+                ><button
+                  type="button"
+                  class="copy-button"
+                  data-copy="install-code"
+                  aria-label="Copy install command"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="#i-copy" /></svg>
+                </button>
+              </div>
+              <div class="code-block">
+                <div class="code-heading">
+                  <span>vite.config.ts</span
+                  ><button
+                    type="button"
+                    class="copy-button"
+                    data-copy="vite-code"
+                    aria-label="Copy Vite configuration"
+                  >
+                    <svg class="icon" aria-hidden="true"><use href="#i-copy" /></svg>
+                  </button>
+                </div>
+                <pre><code id="vite-code"><span class="syntax-key">import</span> { ainotation } <span class="syntax-key">from</span> <span class="syntax-string">'@ainotation/vite'</span>;
+
+<span class="syntax-key">export default</span> {
+  plugins: [ainotation({ name: <span class="syntax-string">'my-app'</span> })],
+};</code></pre>
+              </div>
+              <p class="step-note" data-i18n="installNote">
+                Keep your existing plugins. The SDK is included. Open your development app and look
+                for the floating Ainotation icon.
+              </p>
+            </article>
+            <article class="setup-step">
+              <header>
+                <span class="step-number">b.</span>
+                <h3 data-i18n="connectTitle">Your coding agent</h3>
+              </header>
+              <div class="code-block">
+                <div class="code-heading">
+                  <span data-i18n="mcpConfiguration">MCP client configuration</span
+                  ><button
+                    type="button"
+                    class="copy-button"
+                    data-copy="mcp-code"
+                    aria-label="Copy MCP configuration"
+                  >
+                    <svg class="icon" aria-hidden="true"><use href="#i-copy" /></svg>
+                  </button>
+                </div>
+                <pre><code id="mcp-code">{
+  <span class="syntax-string">"mcpServers"</span>: {
+    <span class="syntax-string">"ainotation"</span>: {
+      <span class="syntax-string">"command"</span>: <span class="syntax-string">"npx"</span>,
+      <span class="syntax-string">"args"</span>: [<span class="syntax-string">"--yes"</span>, <span class="syntax-string">"@ainotation/mcp@beta"</span>, <span class="syntax-string">"connect"</span>]
+    }
+  }
+}</code></pre>
+              </div>
+              <p class="step-note" data-i18n="connectNote">
+                Your client should share workspace roots. Otherwise, append --directory and your
+                project path.
+              </p>
+              <a
+                class="quiet-link"
+                id="setup-guide"
+                href="https://github.com/nightire/ainotation#connect-your-coding-agent"
+                ><span data-i18n="setupGuide">Read the setup guide</span> ↗</a
+              >
+            </article>
+          </div>
+        </section>
+
+        <section class="footnotes" aria-label="Product details">
+          <p class="folio" data-i18n="footnotes">A few things to keep in mind</p>
+          <div class="footnote-grid">
+            <article>
+              <span>i.</span>
+              <h3 data-i18n="localTitle">Local by default.</h3>
+              <p data-i18n="localBody">
+                Feedback lives in your browser, organized by project and page. No account or cloud
+                setup. MCP is optional.
+              </p>
+            </article>
+            <article>
+              <span>ii.</span>
+              <h3 data-i18n="productionTitle">For the workbench.</h3>
+              <p data-i18n="productionBody">
+                The Vite plugin runs in development. Your production build stays free of the
+                inspector. Screen capture asks for your permission.
+              </p>
+            </article>
+            <article>
+              <span>iii.</span>
+              <h3 data-i18n="licenseTitle">Free to develop with.</h3>
+              <p data-i18n="licenseBody">
+                Internal development is free, including commercial projects. Commercial
+                distribution, hosted services and production integration require authorization.
+              </p>
+              <a
+                href="https://github.com/nightire/ainotation/blob/main/LICENSE"
+                data-i18n="readLicense"
+                >Full license ↗</a
+              >
+            </article>
+          </div>
+        </section>
+      </main>
+      <footer class="site-footer">
+        <a class="brand footer-brand" href="#"
+          ><span class="brand-mark" aria-hidden="true"
+            ><img class="logo-light" src="/logo.svg" width="42" height="42" alt="" /><img
+              class="logo-dark"
+              src="/logo-gold.svg"
+              width="42"
+              height="42"
+              alt="" /></span
+          >Ainotation</a
+        >
+        <p data-i18n="footerTagline">The next detail is yours.</p>
+        <div>
+          <a id="docs-link" href="https://github.com/nightire/ainotation#readme" data-i18n="docs"
+            >Guide</a
+          ><a href="https://www.npmjs.com/package/@ainotation/vite">npm</a
+          ><a href="https://github.com/nightire/ainotation">GitHub</a
+          ><a href="#start" data-i18n="backToSetup">Get the tool ↑</a>
+        </div>
+        <span class="end-mark" aria-hidden="true">■</span>
+      </footer>
+    </div>
+    <div id="demo-root" data-ainotation-ui="website-demo-root"></div>
+    <div class="demo-controls" id="demo-controls" data-ainotation-ui="website-controls" hidden>
+      <span data-i18n="demoHint"
+        >Click the floating Ainotation icon to annotate this page. Demo feedback stays in this
+        browser.</span
+      ><button id="exit-demo" type="button">
+        <span data-i18n="exitDemo">Exit demo</span
+        ><svg class="icon" aria-hidden="true"><use href="#i-close" /></svg>
+      </button>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

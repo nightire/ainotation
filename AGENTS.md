@@ -21,6 +21,7 @@
 ## 实现边界
 
 - MCP 是首版正式能力，但基础标注不依赖其运行；未连接时可复制反馈、导出附件。两种出口共用数据契约。
+- SDK 支持 `mcp: false` 的实例级仅本地模式：不读取或修改 MCP 凭据、不连接或同步、不显示 MCP 连接配置与状态，保留标注、图片、复制和导出；不能与 `development` 同时设置。官网演示使用该模式，默认和 Vite 自动配对行为保持兼容。
 - 当前阶段仅开放持久化标注 CRUD 与批量复制/导出；多轮对话模型和持久化能力保留在内部，UI 与 MCP 工具不开放回复或处理状态工作流。
 - 标注与草稿按项目和完整页面 URL 隔离；复制汇总当前项目所有已保存页面并按 URL 分组，JSON 导出与清除操作作用于当前页面。路由往返时重新校验目标身份并恢复对应页面的 marker。
 - 支持正文文本选区标注与有边界的通用 DOM 上下文采集。Settings 提供 Compact / Standard / Detailed / Everything 四档 Markdown 输出，默认 Standard；档位不裁剪持久化、JSON 导出或 MCP 数据。React 组件链和源码定位不属于当前阶段。
@@ -47,6 +48,7 @@ packages/
 apps/
   playground/          SDK 集成开发与验证
   storybook/           UI 组件开发
+  website/             单页产品官网，GitHub Pages 部署
 pnpm-workspace.yaml    Workspace 配置与依赖版本 catalog
 ```
 

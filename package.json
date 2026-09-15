@@ -9,6 +9,8 @@
     "dev:vue": "vp run @ainotation/vue#dev",
     "dev:apps": "vp run --parallel --filter @ainotation/playground --filter @ainotation/react --filter @ainotation/vue dev",
     "storybook": "vp run @ainotation/storybook#dev",
+    "dev:website": "vp run @ainotation/website#dev",
+    "build:website": "vp run @ainotation/website#build",
     "build": "vp run -r build",
     "test": "vp run -r test",
     "typecheck": "vp run -r typecheck",

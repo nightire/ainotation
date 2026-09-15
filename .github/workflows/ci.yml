@@ -57,4 +57,4 @@ jobs:
           cache: false
       - run: pnpm --dir packages/sdk exec playwright install chrome
       - run: vp run build:packages
-      - run: vp run @ainotation/sdk#test && vp run @ainotation/playground#test
+      - run: vp run @ainotation/sdk#test && vp run @ainotation/playground#test && vp run @ainotation/website#test

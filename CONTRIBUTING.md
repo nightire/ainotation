@@ -27,13 +27,14 @@ vp run dev
 
 The Playground uses the Vite plugin to mount Ainotation automatically. Follow the URL printed by the development server.
 
-| Command            | Purpose                        |
-| ------------------ | ------------------------------ |
-| `vp run dev`       | Vanilla TypeScript Playground  |
-| `vp run dev:react` | React integration example      |
-| `vp run dev:vue`   | Vue integration example        |
-| `vp run dev:apps`  | All three web examples         |
-| `vp run storybook` | Isolated UI component examples |
+| Command              | Purpose                        |
+| -------------------- | ------------------------------ |
+| `vp run dev`         | Vanilla TypeScript Playground  |
+| `vp run dev:react`   | React integration example      |
+| `vp run dev:vue`     | Vue integration example        |
+| `vp run dev:apps`    | All three web examples         |
+| `vp run storybook`   | Isolated UI component examples |
+| `vp run dev:website` | Single-page product website    |
 
 ## Repository layout
 
@@ -48,6 +49,7 @@ apps/
   react/        React example
   vue/          Vue example
   storybook/    Component development
+  website/      Product website for GitHub Pages
 ```
 
 Implementation boundaries are documented in [AGENTS.md](./AGENTS.md). User-facing interface messages live in `packages/sdk/src/i18n/`; keep all five language dictionaries complete when adding messages.
