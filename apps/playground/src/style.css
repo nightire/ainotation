@@ -152,6 +152,9 @@ svg {
 .sample + .sample {
   margin-top: 32px;
 }
+.sample > h2 {
+  text-decoration: underline;
+}
 .sample-description {
   color: #637068;
   margin: -8px 0 16px;
