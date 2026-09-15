@@ -8,6 +8,7 @@ import { themeStyles } from './theme';
 import { toolNode } from '../core/dom';
 import { getViewport } from './position';
 import { messages } from '../i18n';
+import { bindMarkerEvents } from './marker-input';
 
 type Rect = TargetSnapshot['rect'];
 type Options = {
@@ -461,10 +462,88 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     }
   }
 
-  const stop = (event: Event) => event.stopPropagation();
-  for (const type of ['click', 'dblclick', 'pointerdown', 'pointerup']) {
-    shadow.addEventListener(type, stop, { signal: abort.signal });
+  function activate(button: HTMLButtonElement) {
+    if (button.disabled || !view) return;
+    if (button.classList.contains('marker')) {
+      if (button.dataset.annotationId) onAction({ type: 'edit', id: button.dataset.annotationId });
+      else shadow.querySelector('textarea')?.focus({ preventScroll: true });
+      return;
+    }
+    const type = button.dataset.action;
+    switch (type) {
+      case 'choose-image':
+        shadow.querySelector<HTMLInputElement>('input[type=file]')?.click();
+        break;
+      case 'screenshot':
+      case 'save':
+      case 'cancel-edit':
+        onAction({ type });
+        break;
+      case 'delete':
+        if (view.editingId) onAction({ type, id: view.editingId });
+        break;
+      case 'edit-image':
+      case 'remove-image':
+      case 'download-image':
+        if (button.dataset.imageId) onAction({ type, id: button.dataset.imageId });
+        break;
+    }
   }
+  bindMarkerEvents({
+    root: shadow,
+    signal: abort.signal,
+    active: () => visible && !destroyed,
+    passthrough: () => !!view?.passthrough,
+    handle(event, target) {
+      if (event.type === 'click') {
+        const button = target.closest('button');
+        if (button) activate(button);
+      } else if (event.type === 'keydown' && event instanceof KeyboardEvent) {
+        if (event.isComposing || event.defaultPrevented) return;
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          onAction({ type: 'cancel-edit' });
+        } else if (
+          target instanceof HTMLTextAreaElement &&
+          event.key === 'Enter' &&
+          event.metaKey &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.shiftKey
+        ) {
+          event.preventDefault();
+          const save = shadow.querySelector<HTMLButtonElement>('.actions .primary');
+          if (save && !event.repeat) activate(save);
+        }
+      } else if (event.type === 'input' && target instanceof HTMLTextAreaElement) {
+        onAction({ type: 'draft', value: target.value });
+      } else if (
+        event.type === 'change' &&
+        target instanceof HTMLInputElement &&
+        target.type === 'file'
+      ) {
+        const file = target.files?.[0];
+        target.value = '';
+        if (file) onAction({ type: 'import-image', file });
+      } else if (event.type === 'paste' && event instanceof ClipboardEvent) {
+        const file = [...(event.clipboardData?.files ?? [])].find((file) =>
+          file.type.startsWith('image/'),
+        );
+        if (file) {
+          event.preventDefault();
+          onAction({ type: 'import-image', file });
+        }
+      } else if (event instanceof DragEvent && event.dataTransfer) {
+        if (event.type === 'dragover' && event.dataTransfer.types.includes('Files')) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        } else if (event.type === 'drop' && event.dataTransfer.files.length) {
+          event.preventDefault();
+          onAction({ type: 'import-image', file: event.dataTransfer.files[0]! });
+        }
+      }
+    },
+  });
   document.addEventListener('scroll', schedule, { capture: true, signal: abort.signal });
   window.addEventListener('resize', schedule, { signal: abort.signal });
   window.visualViewport?.addEventListener('resize', schedule, { signal: abort.signal });
@@ -481,8 +560,9 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       const focusedId = focused?.dataset.annotationId;
       const previousEditorId = editorId;
       view = next;
+      // Hiding for image editing must not leak its focusout to host dismissal handlers.
+      if (!nextVisible) focused?.blur();
       visible = nextVisible;
-      if (!visible) focused?.blur();
       host.style.setProperty('display', visible ? 'block' : 'none', 'important');
       const annotations = next.document?.annotations ?? [];
       const editorTargets = next.editingId
@@ -512,7 +592,6 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                   type="button"
                   data-annotation-id=${annotation.id}
                   aria-label=${m.editAnnotation(index + 1)}
-                  @click=${() => onAction({ type: 'edit', id: annotation.id })}
                 >
                   <span class="number">${index + 1}</span>
                   <span class="pencil"
@@ -524,12 +603,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
             ${
               open && !next.editingId && next.marker
                 ? html`
-                    <button
-                      class="marker"
-                      type="button"
-                      aria-label=${m.newAnnotation}
-                      @click=${() => shadow.querySelector('textarea')?.focus({ preventScroll: true })}
-                    >
+                    <button class="marker" type="button" aria-label=${m.newAnnotation}>
                       ${createElement(Plus, { 'aria-hidden': 'true', focusable: 'false' })}
                     </button>
                   `
@@ -542,37 +616,6 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                       class="popover"
                       role="dialog"
                       aria-label=${next.editingId ? m.editFeedback : m.newFeedback}
-                      @paste=${(event: ClipboardEvent) => {
-                        const file = [...(event.clipboardData?.files ?? [])].find((file) =>
-                          file.type.startsWith('image/'),
-                        );
-                        if (file) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onAction({ type: 'import-image', file });
-                        }
-                      }}
-                      @dragover=${(event: DragEvent) => {
-                        if (event.dataTransfer?.types.includes('Files')) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          event.dataTransfer.dropEffect = 'copy';
-                        }
-                      }}
-                      @drop=${(event: DragEvent) => {
-                        if (!event.dataTransfer?.files.length) return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const file = event.dataTransfer.files[0];
-                        if (file) onAction({ type: 'import-image', file });
-                      }}
-                      @keydown=${(event: KeyboardEvent) => {
-                        if (event.key === 'Escape' && !event.isComposing) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          onAction({ type: 'cancel-edit' });
-                        }
-                      }}
                     >
                       <ul class="target-list" aria-label=${m.selectedElements}>
                         ${repeat(
@@ -591,24 +634,6 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         maxlength="10000"
                         .value=${next.draft}
                         ?disabled=${next.storage === 'loading'}
-                        @keydown=${(event: KeyboardEvent) => {
-                          if (
-                            !visible ||
-                            event.defaultPrevented ||
-                            event.isComposing ||
-                            event.key !== 'Enter' ||
-                            !event.metaKey ||
-                            event.altKey ||
-                            event.ctrlKey ||
-                            event.shiftKey
-                          )
-                            return;
-                          event.preventDefault();
-                          event.stopPropagation();
-                          if (!event.repeat)
-                            shadow.querySelector<HTMLButtonElement>('.actions .primary')?.click();
-                        }}
-                        @input=${(event: Event) => onAction({ type: 'draft', value: (event.currentTarget as HTMLTextAreaElement).value })}
                       ></textarea>
                       <div class="images" aria-label=${m.attachedImages}>
                         ${next.images.map(
@@ -618,7 +643,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                               type="button"
                               aria-label=${m.editImage(index + 1)}
                               ?disabled=${!next.imageUrls[image.id]}
-                              @click=${() => onAction({ type: 'edit-image', id: image.id })}
+                              data-action="edit-image"
+                              data-image-id=${image.id}
                             >
                               ${next.imageUrls[image.id] ? html`<img src=${next.imageUrls[image.id]} alt=${m.attachedImage(index + 1)} />` : m.image(index + 1)}
                             </button>
@@ -628,7 +654,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                               aria-label=${m.downloadImageNumber(index + 1)}
                               title=${m.downloadImage}
                               ?disabled=${!next.imageUrls[image.id]}
-                              @click=${() => onAction({ type: 'download-image', id: image.id })}
+                              data-action="download-image"
+                              data-image-id=${image.id}
                             >
                               ${createElement(Download, { 'aria-hidden': 'true' })}
                             </button>
@@ -637,7 +664,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                               type="button"
                               aria-label=${m.removeImageNumber(index + 1)}
                               title=${m.removeImage}
-                              @click=${() => onAction({ type: 'remove-image', id: image.id })}
+                              data-action="remove-image"
+                              data-image-id=${image.id}
                             >
                               ${createElement(Trash2, { 'aria-hidden': 'true' })}
                             </button>
@@ -650,7 +678,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           aria-label=${m.screenshot}
                           title=${m.screenshotHint}
                           ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
-                          @click=${() => onAction({ type: 'screenshot' })}
+                          data-action="screenshot"
                         >
                           ${createElement(Camera, { 'aria-hidden': 'true', focusable: 'false' })}
                         </button>
@@ -659,27 +687,17 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           aria-label=${m.chooseImage}
                           title=${m.chooseImage}
                           ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
-                          @click=${() => shadow.querySelector<HTMLInputElement>('input[type=file]')?.click()}
+                          data-action="choose-image"
                         >
                           ${createElement(ImagePlus, { 'aria-hidden': 'true', focusable: 'false' })}
                         </button>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          hidden
-                          @change=${(event: Event) => {
-                            const input = event.currentTarget as HTMLInputElement;
-                            const file = input.files?.[0];
-                            input.value = '';
-                            if (file) onAction({ type: 'import-image', file });
-                          }}
-                        />
+                        <input type="file" accept="image/png,image/jpeg,image/webp" hidden />
                         <div class="actions-end">
                           <button
                             type="button"
                             aria-label=${m.cancel}
                             title=${m.cancel}
-                            @click=${() => onAction({ type: 'cancel-edit' })}
+                            data-action="cancel-edit"
                           >
                             ${createElement(X, { 'aria-hidden': 'true', focusable: 'false' })}
                           </button>
@@ -690,7 +708,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                             title=${m.shortcut(next.editingId ? m.save : m.add, 'Command/Super + Enter')}
                             aria-keyshortcuts="Meta+Enter"
                             ?disabled=${!next.draft.trim() || next.saving || next.storage === 'loading'}
-                            @click=${() => onAction({ type: 'save' })}
+                            data-action="save"
                           >
                             ${createElement(Check, { 'aria-hidden': 'true', focusable: 'false' })}
                           </button>
@@ -702,7 +720,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                                   aria-label=${m.delete}
                                   title=${m.delete}
                                   ?disabled=${next.saving}
-                                  @click=${() => onAction({ type: 'delete', id: next.editingId! })}
+                                  data-action="delete"
                                 >
                                   ${createElement(Trash2, { 'aria-hidden': 'true', focusable: 'false' })}
                                 </button>`

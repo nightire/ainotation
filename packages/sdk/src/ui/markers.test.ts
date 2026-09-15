@@ -528,7 +528,7 @@ describe('in-place annotation markers', () => {
     expect(center(control('[data-annotation-id="new"]'))).toEqual({ x: 300, y: 200 });
   });
 
-  it('isolates tool clicks and Escape while keeping document capture shortcuts available', () => {
+  it('isolates tool clicks and Escape from document capture while keeping Alt shortcuts available', () => {
     const { control, onAction } = mount({ editorOpen: true, marker: annotation.marker! });
     const abort = new AbortController();
     cleanup.push(() => abort.abort());
@@ -552,7 +552,7 @@ describe('in-place annotation markers', () => {
     expect(escape.defaultPrevented).toBe(true);
     expect(onAction).toHaveBeenCalledExactlyOnceWith({ type: 'cancel-edit' });
     expect(bubblingKey).not.toHaveBeenCalled();
-    expect(capture).toHaveBeenCalledOnce();
+    expect(capture).not.toHaveBeenCalled();
     const shortcut = new KeyboardEvent('keydown', {
       key: 'A',
       code: 'KeyA',
@@ -564,8 +564,83 @@ describe('in-place annotation markers', () => {
     });
     textarea.dispatchEvent(shortcut);
     expect(shortcut.defaultPrevented).toBe(false);
-    expect(capture).toHaveBeenCalledTimes(2);
+    expect(capture).toHaveBeenCalledOnce();
     expect(onAction).toHaveBeenCalledOnce();
+  });
+
+  it('isolates editor focus, text and composition events without preventing native editing defaults', () => {
+    const abort = new AbortController();
+    cleanup.push(() => abort.abort());
+    const hostEvents = vi.fn();
+    for (const type of [
+      'pointerdown',
+      'mousedown',
+      'focusout',
+      'focusin',
+      'keydown',
+      'beforeinput',
+      'input',
+      'paste',
+      'compositionstart',
+      'compositionend',
+      'wheel',
+    ])
+      document.addEventListener(type, hostEvents, { capture: true, signal: abort.signal });
+    const source = fixture('button');
+    source.focus();
+    hostEvents.mockClear();
+    const { control, onAction, layer, root, view } = mount({
+      editorOpen: true,
+      marker: annotation.marker!,
+    });
+    expect(root.activeElement).toBe(control('textarea'));
+    expect(hostEvents).not.toHaveBeenCalled();
+    const textarea = control<HTMLTextAreaElement>('textarea');
+    for (const event of [
+      new PointerEvent('pointerdown', { bubbles: true, composed: true, cancelable: true }),
+      new MouseEvent('mousedown', { bubbles: true, composed: true, cancelable: true }),
+      new KeyboardEvent('keydown', {
+        key: 'a',
+        metaKey: true,
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      }),
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        isComposing: true,
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      }),
+      new InputEvent('beforeinput', {
+        data: '批注',
+        inputType: 'insertCompositionText',
+        isComposing: true,
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      }),
+      new CompositionEvent('compositionstart', { bubbles: true, composed: true }),
+      new CompositionEvent('compositionend', { data: '批注', bubbles: true, composed: true }),
+      new ClipboardEvent('paste', { bubbles: true, composed: true, cancelable: true }),
+      new WheelEvent('wheel', { deltaY: 20, bubbles: true, composed: true, cancelable: true }),
+    ]) {
+      textarea.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+    textarea.value = '批注';
+    textarea.dispatchEvent(
+      new InputEvent('input', { data: '批注', bubbles: true, composed: true }),
+    );
+    expect(onAction).toHaveBeenCalledExactlyOnceWith({ type: 'draft', value: '批注' });
+    expect(hostEvents).not.toHaveBeenCalled();
+    layer.update(view, false);
+    expect(hostEvents).not.toHaveBeenCalled();
+    layer.destroy();
+    hostEvents.mockClear();
+    source.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+    expect(hostEvents).toHaveBeenCalledOnce();
   });
 
   it('refreshes live geometry on mutations, captured scroll, resize, and ResizeObserver without polling', async () => {
