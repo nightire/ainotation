@@ -177,8 +177,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup, examples and checks, a
 
 ## License
 
-Ainotation is **source available** under the [Ainotation Development and Non-Commercial License](./LICENSE).
+Ainotation is open source under the [MIT License](./LICENSE), free for personal and commercial use.
 
-Internal development and debugging are free, including work on commercial applications. Commercial distribution, hosted services and production integration of Ainotation require separate written authorization from [nightire](https://github.com/nightire). Applications that do not contain Ainotation, and user-created feedback and screenshots, are not restricted merely because Ainotation was used to create them.
+You may use, modify, distribute and sell copies, including in proprietary products and hosted services, provided you retain the copyright and license notices. Third-party components retain their own licenses.
 
-This is not an OSI-approved open-source license. See [LICENSE](./LICENSE) for the complete terms.
+Previously published `1.0.0-beta.0` and `1.0.0-beta.1` npm archives contain the earlier license. Use a subsequent release carrying MIT for the updated terms. See [LICENSE](./LICENSE) for the complete terms.

@@ -19,7 +19,6 @@ the feedback model and integration options.
 
 ## License
 
-Source available under the included Ainotation Development and Non-Commercial
-License. Internal development and debugging, including for commercial projects,
-are free. Commercial distribution, hosted services and production integration of
-Ainotation require separate written authorization. See LICENSE for complete terms.
+MIT licensed, free for personal and commercial use, including modification,
+redistribution, hosted services and proprietary integration. Retain the copyright
+and license notices. See LICENSE for complete terms.

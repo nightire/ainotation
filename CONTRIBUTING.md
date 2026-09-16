@@ -75,4 +75,4 @@ Add a changeset for user-facing package changes with `vp run changeset`. Documen
 
 ## License
 
-Please review [LICENSE](./LICENSE) before using or redistributing the project. Ainotation is source available; internal development is permitted, while commercial distribution, hosted services and production integration require separate authorization. Third-party components retain their own licenses.
+Ainotation is open source under the [MIT License](./LICENSE), permitting personal and commercial use, modification and redistribution with the copyright and license notices retained. Third-party components retain their own licenses.

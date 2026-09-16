@@ -6,7 +6,7 @@
   "bugs": {
     "url": "https://github.com/nightire/ainotation/issues"
   },
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nightire/ainotation.git",

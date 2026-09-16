@@ -61,8 +61,9 @@ const zh = {
   footnotes: '几件值得记住的小事',
   productionTitle: '属于开发工作台。',
   productionBody: 'Vite 插件只在开发环境启用，生产构建不包含检查器。屏幕截图会先征求你的授权。',
-  licenseTitle: '开发使用免费。',
-  licenseBody: '内部开发免费，包括商业项目。商业分发、托管服务及生产集成需另行获得授权。',
+  licenseTitle: 'MIT 开源，自由使用。',
+  licenseBody:
+    '免费用于个人和商业项目。可以使用、修改、分发，也可集成到自己的产品中。请保留版权和许可声明。',
   readLicense: '完整许可证 ↗',
   footerTagline: '下一个细节，交给你。',
   docs: '使用指南',

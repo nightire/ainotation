@@ -92,6 +92,11 @@ Playground browser interactions, native screenshot capture and touch input run o
 macOS Chrome, matching the verified capture environment. Both jobs must pass
 before the release workflow proceeds; no browser tests are skipped.
 
-All releases include the source-available Ainotation Development and
-Non-Commercial License. Internal development is free; commercial distribution,
-hosted services and production integration require separate written authorization.
+New releases include the MIT License and use the `MIT` SPDX identifier in package
+metadata. Prepack copies the root license into each public package; `release:check`
+verifies both the identifier and the complete license text in every archive.
+Bundled third-party notices remain included under their original licenses.
+
+The previously published `1.0.0-beta.0` and `1.0.0-beta.1` archives retain the
+earlier license. Publish the MIT transition as a new version rather than replacing
+existing archives or rewriting historical changelog entries.

@@ -13,6 +13,8 @@ const packages = ['schema', 'sdk', 'mcp', 'vite'];
 const run = (command, args, cwd = root) =>
   exec(command, args, { cwd, maxBuffer: 10 * 1024 * 1024 });
 try {
+  const license = await readFile(join(root, 'LICENSE'), 'utf8');
+  assert.match(license, /^MIT License\n/);
   const archives = [];
   let version;
   for (const name of packages) {
@@ -29,7 +31,12 @@ try {
     const packed = JSON.parse((await run('tar', ['-xOf', archive, 'package/package.json'])).stdout);
     assert(files.includes('package/LICENSE'));
     assert(files.includes('package/README.md'));
-    assert.equal(packed.license, 'SEE LICENSE IN LICENSE');
+    assert.equal(packed.license, 'MIT');
+    assert.equal(
+      (await run('tar', ['-xOf', archive, 'package/LICENSE'])).stdout,
+      license,
+      `${packed.name} must include the complete root MIT License`,
+    );
     assert.equal(packed.publishConfig.access, 'public');
     assert.equal(packed.repository.url, 'git+https://github.com/nightire/ainotation.git');
     for (const file of files)
