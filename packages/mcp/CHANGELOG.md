@@ -1,5 +1,21 @@
 # @ainotation/mcp
 
+## 1.0.0-beta.1
+
+### Minor Changes
+
+- d994c13: Recover missing service state through an independent instance coordinator, repair loaded snapshots, retain JSON backups, and add doctor/repair/external-backup commands. Introduce storage epochs and missing-image negotiation, pause conflicting recovery before replacing browser feedback, and add project restoration and version-choice controls with retained local copies. Protect coordinator credentials from Vite file serving.
+
+### Patch Changes
+
+- 5afa2bc: Share typed sync diagnostics across the service, Vite bridge and SDK so recovery conflicts and storage failures retain their intended behavior. Enforce annotation page isolation in the feedback store for both HTTP entry points. Make repeated SDK mounts await initialization and prevent stale preference caches from overriding newer local changes when storage writes fail.
+
+  Separate DOM subscription management from selection state and avoid full-document shadow-root rescans for ordinary style and text updates.
+
+- Updated dependencies [5afa2bc]
+- Updated dependencies [d994c13]
+  - @ainotation/schema@1.0.0-beta.1
+
 ## 1.0.0-beta.0
 
 ### Major Changes

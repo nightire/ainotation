@@ -1,6 +1,6 @@
 {
   "name": "@ainotation/schema",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta.1",
   "description": "Shared feedback contracts and Markdown/JSON handoff for Ainotation",
   "homepage": "https://github.com/nightire/ainotation#readme",
   "bugs": {
