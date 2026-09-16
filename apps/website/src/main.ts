@@ -1,5 +1,6 @@
 import './style.css';
 import type { Ainotation } from '@ainotation/sdk';
+import { createPreviewCarousel } from './preview-carousel';
 
 const zh = {
   skip: '跳到正文',
@@ -72,6 +73,7 @@ const zh = {
 
 type Language = 'en' | 'zh-CN';
 type Mode = 'select' | 'draw' | 'handoff';
+const modes: Mode[] = ['select', 'draw', 'handoff'];
 const lifetime = new AbortController();
 const { signal } = lifetime;
 const root = document.documentElement;
@@ -105,6 +107,7 @@ const demoButton = byId<HTMLButtonElement>('try-demo');
 const systemTheme = matchMedia('(prefers-color-scheme: dark)');
 let language: Language = 'en';
 let mode: Mode = 'select';
+let carousel: ReturnType<typeof createPreviewCarousel> | undefined;
 let inspector: Ainotation | null = null;
 let loadingDemo = false;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -189,7 +192,7 @@ function setTheme(value: 'light' | 'dark', persist = true) {
   updateControlLabels();
   syncDemoAppearance();
 }
-function setMode(value: Mode) {
+function setMode(value: Mode, restart = true) {
   mode = value;
   preview.dataset.mode = value;
   preview.querySelector<HTMLElement>('.handoff-card')!.hidden = value !== 'handoff';
@@ -207,6 +210,7 @@ function setMode(value: Mode) {
         : 'A little more breathing room here, please.'
       : text('noteSelect');
   drawPreview();
+  if (restart) carousel?.reset();
 }
 function drawPreview() {
   if (mode !== 'draw') return;
@@ -253,7 +257,7 @@ function setLanguage(value: Language, persist = true) {
     }
   }
   updateControlLabels();
-  setMode(mode);
+  setMode(mode, false);
   syncDemoAppearance();
 }
 themeButton.addEventListener(
@@ -276,7 +280,6 @@ for (const button of preview.querySelectorAll<HTMLButtonElement>('[data-preview]
   button.addEventListener(
     'keydown',
     (event) => {
-      const modes: Mode[] = ['select', 'draw', 'handoff'];
       let index = modes.indexOf(mode);
       if (event.key === 'ArrowRight') index = (index + 1) % modes.length;
       else if (event.key === 'ArrowLeft') index = (index + modes.length - 1) % modes.length;
@@ -437,4 +440,9 @@ window.addEventListener(
 signal.addEventListener('abort', () => cancelAnimationFrame(progressFrame), { once: true });
 import.meta.hot?.dispose(dispose);
 setLanguage(language, false);
+carousel = createPreviewCarousel(
+  preview,
+  () => setMode(modes[(modes.indexOf(mode) + 1) % modes.length]!, false),
+  signal,
+);
 updateProgress();

@@ -1,10 +1,10 @@
 import { resolve } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { build, preview } from 'vite-plus';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { expect, it } from 'vite-plus/test';
 
-it('serves the Pages build, switches appearance and language, and runs a local SDK demo', async () => {
+async function withWebsite(run: (page: Page, url: string, root: string) => Promise<void>) {
   const root = resolve(import.meta.dirname, '..');
   await build({ root, logLevel: 'silent' });
   const web = await preview({
@@ -23,11 +23,23 @@ it('serves the Pages build, switches appearance and language, and runs a local S
       colorScheme: 'light',
       locale: 'en-US',
     });
-    const errors: string[] = [];
     const page = await context.newPage();
-    page.on('pageerror', (error) => errors.push(error.message));
     page.setDefaultTimeout(7000);
-    const response = await page.goto(`http://127.0.0.1:${address.port}/ainotation/`, {
+    await run(page, `http://127.0.0.1:${address.port}/ainotation/`, root);
+  } finally {
+    await browser?.close();
+    await new Promise<void>((resolve, reject) => {
+      web.httpServer.close((error) => (error ? reject(error) : resolve()));
+      if ('closeAllConnections' in web.httpServer) web.httpServer.closeAllConnections();
+    });
+  }
+}
+
+it('serves the Pages build, switches appearance and language, and runs a local SDK demo', () =>
+  withWebsite(async (page, url, root) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    const response = await page.goto(url, {
       waitUntil: 'networkidle',
     });
     expect(response?.status()).toBe(200);
@@ -266,11 +278,112 @@ it('serves the Pages build, switches appearance and language, and runs a local S
       animations: 'disabled',
     });
     expect(errors).toEqual([]);
-  } finally {
-    await browser?.close();
-    await new Promise<void>((resolve, reject) => {
-      web.httpServer.close((error) => (error ? reject(error) : resolve()));
-      if ('closeAllConnections' in web.httpServer) web.httpServer.closeAllConnections();
+  }));
+
+it('rotates the preview every five seconds and preserves progress across hover and visibility pauses', () =>
+  withWebsite(async (page, url, root) => {
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') });
+    await page.goto(url, { waitUntil: 'networkidle' });
+    await page.clock.pauseAt(new Date('2026-01-01T01:00:00Z'));
+    const preview = page.locator('#product-preview');
+    const mode = () => preview.getAttribute('data-mode');
+    const progress = () =>
+      page
+        .locator('[data-preview][aria-selected="true"]')
+        .evaluate((tab) => new DOMMatrix(getComputedStyle(tab, '::after').transform).a);
+    await page.locator('#tab-select').click();
+    await page.mouse.move(0, 0);
+    await page.clock.runFor(2000);
+    expect(await mode()).toBe('select');
+    expect(await progress()).toBeCloseTo(0.4, 2);
+
+    await page.locator('#preview-panel').hover();
+    const paused = await progress();
+    await page.clock.runFor(10000);
+    expect(await mode()).toBe('select');
+    expect(await progress()).toBe(paused);
+    await preview.screenshot({
+      path: resolve(root, '../../output/playwright/website-carousel.png'),
     });
-  }
-});
+    await page.mouse.move(0, 0);
+    await page.clock.runFor(2999);
+    expect(await mode()).toBe('select');
+    await page.clock.runFor(1);
+    expect(await mode()).toBe('draw');
+    expect(await progress()).toBe(0);
+    await page.clock.runFor(5000);
+    expect(await mode()).toBe('handoff');
+    expect(await page.locator('.handoff-card').isVisible()).toBe(true);
+    await page.clock.runFor(5000);
+    expect(await mode()).toBe('select');
+
+    // A manual tab selection starts a full interval; mouse focus does not latch a pause.
+    await page.clock.runFor(3000);
+    await page.locator('#tab-draw').click();
+    expect(await progress()).toBe(0);
+    await page.mouse.move(0, 0);
+    await page.clock.runFor(4999);
+    expect(await mode()).toBe('draw');
+    await page.clock.runFor(1);
+    expect(await mode()).toBe('handoff');
+
+    // Translating the current slide must not reset its countdown.
+    await page.clock.runFor(2000);
+    await page.locator('#language-toggle').click();
+    await page.clock.runFor(3000);
+    expect(await mode()).toBe('select');
+
+    // Keyboard navigation pauses while focus remains in the preview.
+    await page.locator('#tab-select').focus();
+    await page.keyboard.press('ArrowRight');
+    await page.clock.runFor(10000);
+    expect(await mode()).toBe('draw');
+    await page.locator('#theme-toggle').focus();
+    await page.clock.runFor(5000);
+    expect(await mode()).toBe('handoff');
+
+    await page.clock.runFor(2000);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    const hiddenProgress = await progress();
+    await page.clock.runFor(10000);
+    expect(await mode()).toBe('handoff');
+    expect(await progress()).toBe(hiddenProgress);
+    await page.evaluate(() => {
+      Reflect.deleteProperty(document, 'hidden');
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.clock.runFor(3000);
+    expect(await mode()).toBe('select');
+
+    async function setReducedMotion(value: 'reduce' | 'no-preference') {
+      const notification = await page.evaluateHandle(() => {
+        const media = matchMedia('(prefers-reduced-motion: reduce)');
+        return {
+          changed: new Promise<void>((resolve) =>
+            media.addEventListener('change', () => resolve(), { once: true }),
+          ),
+        };
+      });
+      await page.emulateMedia({ reducedMotion: value });
+      await notification.evaluate(({ changed }) => changed);
+      await notification.dispose();
+    }
+    await setReducedMotion('reduce');
+    await page.clock.runFor(10000);
+    expect(await mode()).toBe('select');
+    await setReducedMotion('no-preference');
+    await page.clock.runFor(5000);
+    expect(await mode()).toBe('draw');
+
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
+    const disposedProgress = await progress();
+    await page.clock.runFor(10000);
+    expect(await mode()).toBe('draw');
+    expect(await progress()).toBe(disposedProgress);
+    expect(errors).toEqual([]);
+  }));

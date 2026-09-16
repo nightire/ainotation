@@ -28,6 +28,11 @@ storage under a dedicated demo project and sets `mcp: false` to disable MCP,
 including saved connections and the connection form in Settings.
 The illustrative workspace preview is separate from that live demo.
 
+The preview cycles through its three tabs every five seconds, with progress shown
+in the active tab's underline. Hovering or keyboard focus pauses the countdown;
+leaving resumes the remaining time, while selecting a tab starts a fresh interval.
+Background pages pause playback, and reduced-motion preferences disable autoplay.
+
 Brand assets in `public/` are exported from the Ainotation canvas in Brilliant.
 `logo.svg` (forest) and `logo-gold.svg` (warm gold) implement the Light A / Dark A
 marks in the header and footer. The gold favicon is shared across both themes,

@@ -190,6 +190,9 @@ p {
   height: 32px;
   flex-shrink: 0;
 }
+.site-header .brand-mark {
+  padding: 4px;
+}
 .brand-mark img {
   display: block;
   width: 100%;
@@ -350,7 +353,6 @@ h1 {
   align-items: center;
   gap: 21px;
   border-top: 1px solid var(--ink);
-  border-bottom: 1px solid var(--line);
   padding: 14px 0;
   font:
     11px 'IBM Plex Mono',
@@ -373,6 +375,7 @@ h1 {
   padding: 14px 0;
 }
 .preview-controls button {
+  position: relative;
   display: flex;
   gap: 10px;
   align-items: center;
@@ -389,7 +392,17 @@ h1 {
 }
 .preview-controls button[aria-selected='true'] {
   color: var(--ink);
-  border-bottom-color: var(--coral);
+  border-bottom-color: color-mix(in srgb, var(--coral) 20%, transparent);
+}
+.preview-controls button[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  bottom: -2px;
+  height: 2px;
+  background: var(--coral);
+  transform: scaleX(var(--preview-progress, 0));
+  transform-origin: left;
 }
 .proof-stage {
   position: relative;
