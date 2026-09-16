@@ -132,11 +132,27 @@ export const FeedbackOperationSchema = z.discriminatedUnion('kind', [
 export const SyncRequestSchema = z.object({
   document: FeedbackDocumentSchema,
   operations: z.array(FeedbackOperationSchema).max(1000),
+  storageEpoch: z.uuid().optional(),
+  recovery: z
+    .object({
+      epoch: z.uuid(),
+      revision: z.string().regex(/^[a-f0-9]{64}$/),
+      source: z.enum(['browser', 'server']),
+    })
+    .optional(),
 });
-export const SyncResponseSchema = z.object({
-  document: FeedbackDocumentSchema,
-  acknowledged: z.array(z.uuid()),
-});
+export const SyncResponseSchema = z
+  .object({
+    document: FeedbackDocumentSchema,
+    acknowledged: z.array(z.uuid()),
+    storageEpoch: z.uuid().optional(),
+    missingImages: z.array(z.uuid()).optional(),
+    recovery: z.object({ revision: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
+  })
+  .refine(
+    (value) => !value.recovery || !!value.storageEpoch,
+    'Recovery responses require a storage epoch.',
+  );
 
 export type Annotation = z.infer<typeof AnnotationSchema>;
 export type FeedbackDocument = z.infer<typeof FeedbackDocumentSchema>;

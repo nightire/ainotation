@@ -12,7 +12,10 @@ it('opens into selection and supports draggable launcher/panel with mouse, touch
     if (!address || typeof address === 'string') throw new Error('No test server address');
     const origin = `http://127.0.0.1:${address.port}`;
     browser = await chromium.launch({ channel: 'chrome', headless: true });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: 'en-US',
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     const errors: string[] = [];
     configurePage(page, errors);
@@ -270,6 +273,7 @@ it('opens into selection and supports draggable launcher/panel with mouse, touch
     expect(errors).toEqual([]);
 
     const touchContext = await browser.newContext({
+      locale: 'en-US',
       viewport: { width: 390, height: 844 },
       isMobile: true,
       hasTouch: true,

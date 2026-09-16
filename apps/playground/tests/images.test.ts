@@ -48,6 +48,7 @@ async function withEditor(
       ],
     });
     const page = await browser.newPage({
+      locale: 'en-US',
       viewport: { width: 1280, height: 900 },
       deviceScaleFactor,
     });

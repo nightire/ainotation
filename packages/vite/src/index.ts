@@ -11,7 +11,7 @@ import {
 } from '@ainotation/mcp/project';
 import { registerDevelopmentProject } from '@ainotation/mcp/registration';
 import { createBrowserConnection } from '@ainotation/mcp/browser';
-import { defaultServiceDirectory } from '@ainotation/mcp/service';
+import { defaultServiceDirectory, serviceOwnerPaths } from '@ainotation/mcp/service';
 import { createDevelopmentBridge } from './bridge';
 
 export interface AinotationPluginOptions {
@@ -92,6 +92,8 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
     async config(config) {
       const directory = resolve(options.serviceDirectory ?? defaultServiceDirectory());
       const canonical = await canonicalPath(directory);
+      const runtimeDirectory = serviceOwnerPaths(canonical).root;
+      const canonicalRuntime = await canonicalPath(runtimeDirectory);
       return {
         server: {
           fs: {
@@ -108,6 +110,8 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
               ]),
               `${normalizePath(directory)}/**`,
               `${normalizePath(canonical)}/**`,
+              `${normalizePath(runtimeDirectory)}/**`,
+              `${normalizePath(canonicalRuntime)}/**`,
             ],
             allow: [
               ...(config.server?.fs?.allow ?? [
@@ -203,9 +207,23 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
           next();
           return;
         }
-        void handler
-          .handle(request, response, path.slice(bridgePath.length))
-          .catch(() => response.destroy());
+        void (async () => {
+          if (currentProject.configPath && !lifetime.signal.aborted) {
+            try {
+              const identity = await discoverProject(currentProject.root);
+              if (
+                !identity ||
+                identity.root !== currentProject.root ||
+                identity.config.projectId !== currentProject.config.projectId ||
+                identity.config.name !== currentProject.config.name
+              )
+                await close();
+            } catch {
+              await close();
+            }
+          }
+          await handler.handle(request, response, path.slice(bridgePath.length));
+        })().catch(() => response.destroy());
       });
     },
     resolveId(id) {

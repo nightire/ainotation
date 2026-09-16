@@ -46,6 +46,25 @@ export const ja = {
   switchTheme: (name: string) => `${name}テーマに切り替え`,
   connection: 'MCP 接続',
   localMode: 'ローカルのみ',
+  syncStorageFailed:
+    'ローカルに保存済みです。サービスのストレージを修復するため ainotation-mcp doctor を実行して再試行してください。',
+  syncRecoveryNeeded:
+    'ローカルに保存済みです。サービスが別のバージョンを復元したため、同期を一時停止しました。',
+  syncImagesMissing:
+    'フィードバックは保存済みですが、一部の画像がありません。画像を保存しているブラウザーを開いて再アップロードしてください。',
+  retrySync: '接続を再試行',
+  recoverProject: 'このブラウザーからプロジェクトを復元',
+  exportRecovery: '以前のローカル版をエクスポート',
+  recoveryLocalPreview: (count: number) => `ブラウザーのバージョン（${count} 件）`,
+  recoveryServerPreview: (count: number) => `復元したサーバーのバージョン（${count} 件）`,
+  syncProjectProgress: (done: number, total: number) =>
+    `保存済みページ ${total} 件中 ${done} 件を確認しました。`,
+  syncProjectReview:
+    '確認が必要なページがあります。開いてバージョンや不足している画像を確認してください。',
+  recoveryHelp:
+    '先にコピーをエクスポートしてから、このページに残すバージョンを選択してください。サービスは両方のフィードバックを保持します。',
+  recoveryBrowser: 'ブラウザーのバージョンを使用',
+  recoveryServer: '復元したサーバーのバージョンを使用',
   localModeDescription:
     'フィードバックはこのブラウザーに保存されます。コピーまたはエクスポートして共有できます。',
   automaticConnected: '開発サーバー経由で接続済みです。',

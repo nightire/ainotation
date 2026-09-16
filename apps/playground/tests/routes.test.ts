@@ -13,6 +13,7 @@ it('keeps markers and drafts separate across fresh route DOM while copying all p
     const origin = `http://127.0.0.1:${address.port}`;
     browser = await chromium.launch({ channel: 'chrome', headless: true });
     const page = await browser.newPage({
+      locale: 'en-US',
       viewport: { width: 1280, height: 900 },
       permissions: ['clipboard-read', 'clipboard-write'],
     });

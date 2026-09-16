@@ -871,6 +871,41 @@ describe('Inspector shell', () => {
     expect(actions).toEqual([]);
   });
 
+  it('shows project recovery only for problems or an ongoing recovery', async () => {
+    const shell = await mount({ connection: 'connected' });
+    await openSettings(shell);
+    const recovery = () =>
+      shell.shadowRoot!.querySelector<HTMLButtonElement>('[data-command="recover-project"]');
+    expect(recovery()).toBeNull();
+    const actions = actionsFrom(shell);
+    shell.view = { ...shell.view, connection: 'error' };
+    await shell.updateComplete;
+    recovery()!.click();
+    expect(actions).toEqual([{ type: 'recover-project' }]);
+    shell.view = { ...shell.view, connection: 'connected', recoveringProject: true };
+    await shell.updateComplete;
+    expect(recovery()!.disabled).toBe(true);
+    shell.view = { ...shell.view, recoveringProject: false, recoveryNeeded: true };
+    await shell.updateComplete;
+    expect(recovery()!.disabled).toBe(false);
+    shell.view = {
+      ...shell.view,
+      recoveryNeeded: false,
+      recoveryPages: ['http://localhost/pending'],
+    };
+    await shell.updateComplete;
+    expect(recovery()).not.toBeNull();
+    shell.view = { ...shell.view, recoveryPages: [], hasRecoveryCopy: true };
+    await shell.updateComplete;
+    expect(recovery()).toBeNull();
+    shell.view = { ...shell.view, connection: 'offline' };
+    await shell.updateComplete;
+    expect(recovery()).toBeNull();
+    shell.view = { ...shell.view, localOnly: true, connection: 'error', recoveryNeeded: true };
+    await shell.updateComplete;
+    expect(recovery()).toBeNull();
+  });
+
   it.each(locales)(
     'shows local-only settings in %s without MCP status or controls',
     async (locale) => {

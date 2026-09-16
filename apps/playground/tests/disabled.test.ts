@@ -12,6 +12,7 @@ async function withPicker(mobile: boolean, run: (page: Page) => Promise<void>) {
     if (!address || typeof address === 'string') throw new Error('No test server address');
     browser = await chromium.launch({ channel: 'chrome', headless: true });
     const context = await browser.newContext({
+      locale: 'en-US',
       viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 },
       isMobile: mobile,
       hasTouch: mobile,

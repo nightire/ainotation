@@ -44,6 +44,23 @@ export const en = {
   switchTheme: (name: string) => `Switch to ${name.toLowerCase()} mode`,
   connection: 'MCP connection',
   localMode: 'Local only',
+  syncStorageFailed:
+    'Saved locally. Service storage needs repair; run ainotation-mcp doctor, then retry.',
+  syncRecoveryNeeded:
+    'Saved locally. The service recovered a different version; synchronization is paused.',
+  syncImagesMissing:
+    'Feedback is saved, but some image files are missing. Open the browser that holds those images to upload them again.',
+  retrySync: 'Retry connection',
+  recoverProject: 'Restore project from this browser',
+  exportRecovery: 'Export previous local version',
+  recoveryLocalPreview: (count: number) => `Browser version (${count} annotations)`,
+  recoveryServerPreview: (count: number) => `Recovered server version (${count} annotations)`,
+  syncProjectProgress: (done: number, total: number) => `Checked ${done} of ${total} saved pages.`,
+  syncProjectReview: 'Some pages need attention. Open them to review versions or missing images.',
+  recoveryHelp:
+    'Export a copy first. Choose which version to keep for this page; the service preserves both feedback snapshots.',
+  recoveryBrowser: 'Use browser version',
+  recoveryServer: 'Use recovered server version',
   localModeDescription: 'Feedback stays in this browser. Copy or export it to share.',
   automaticConnected: 'Connected through the development server.',
   automaticConnection: 'Automatic connection through the development server.',

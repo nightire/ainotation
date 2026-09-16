@@ -19,6 +19,9 @@ export async function startProjectHttpServer(options: {
   controlToken: string;
   instanceId: string;
   port?: number;
+  beforeRequest?: () => Promise<void>;
+  repair?: () => Promise<void>;
+  maintenanceHealthy?: () => boolean;
 }) {
   const { service, controlToken, instanceId, port = 0 } = options;
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
@@ -54,10 +57,17 @@ export async function startProjectHttpServer(options: {
             ok: true,
             version: 1,
             instanceId,
-            capabilities: { projectDeclarations: true },
+            capabilities: { projectDeclarations: true, recovery: !!options.repair },
+            maintenanceHealthy: options.maintenanceHealthy?.() ?? true,
           });
           return;
         }
+        if (path === '/control/repair' && request.method === 'POST' && options.repair) {
+          await options.repair();
+          json(200, { ok: true, instanceId });
+          return;
+        }
+        await options.beforeRequest?.();
         if (path === '/control/projects' && request.method === 'GET') {
           json(200, { projects: service.listProjects() });
           return;
@@ -141,6 +151,7 @@ export async function startProjectHttpServer(options: {
         response.end();
         return;
       }
+      await options.beforeRequest?.();
       let scope = await scopeFor(request);
       if (
         await imageHttp(request, response, async () => {

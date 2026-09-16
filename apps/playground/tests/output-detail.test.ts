@@ -58,6 +58,7 @@ it('captures text ranges and full context, switches copied detail and restores s
     if (!address || typeof address === 'string') throw new Error('Missing server');
     browser = await chromium.launch({ channel: 'chrome', headless: true });
     const context = await browser.newContext({
+      locale: 'en-US',
       viewport: { width: 1280, height: 900 },
       permissions: ['clipboard-read', 'clipboard-write'],
     });

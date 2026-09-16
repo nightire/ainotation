@@ -60,6 +60,12 @@ export interface InspectorViewState {
   locale: Locale;
   managedConnection: boolean;
   localOnly: boolean;
+  recoveryNeeded: boolean;
+  recoveredDocument?: FeedbackDocument;
+  syncProblem?: UiMessage;
+  recoveringProject: boolean;
+  recoveryPages: string[];
+  hasRecoveryCopy: boolean;
   projectName: string;
   images: FeedbackImage[];
   imageUrls: Record<string, string>;
@@ -76,6 +82,9 @@ export type InspectorAction =
   | { type: 'draft'; value: string }
   | { type: 'edit' | 'delete'; id: string }
   | { type: 'connect'; endpoint: string; token: string }
+  | { type: 'retry-sync' }
+  | { type: 'recover-project' | 'export-recovery' }
+  | { type: 'resolve-recovery'; source: 'browser' | 'server' }
   | { type: 'screenshot' }
   | { type: 'import-image'; file: File }
   | { type: 'remove-image' | 'download-image' | 'edit-image'; id: string };
@@ -102,6 +111,10 @@ export function emptyViewState(): InspectorViewState {
     locale: 'en',
     managedConnection: false,
     localOnly: false,
+    recoveryNeeded: false,
+    recoveringProject: false,
+    recoveryPages: [],
+    hasRecoveryCopy: false,
     projectName: '',
     images: [],
     imageUrls: {},

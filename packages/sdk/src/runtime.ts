@@ -67,6 +67,7 @@ export async function createRuntime(
   let storageReady = false;
   let navigation: ReturnType<typeof setInterval> | undefined;
   let connection: McpConnection | null = null;
+  let projectRecovery: AbortController | undefined;
   let applySelectionTheme: (theme: string) => void = () => {};
   let sync: ReturnType<typeof createSyncClient> | undefined;
   const credentialsKey = `ainotation:mcp:${project}`;
@@ -228,6 +229,10 @@ export async function createRuntime(
   }
 
   function accept(next: DraftRecord) {
+    view.recoveryNeeded = !!next.syncRecovery;
+    if (next.syncRecovery?.server) view.recoveredDocument = next.syncRecovery.server;
+    else delete view.recoveredDocument;
+    view.hasRecoveryCopy = !!next.recoveryCopies?.length;
     if (disposed) return;
     if (reconcilePage() || next.document.url !== pageUrl) return;
     record = next;
@@ -277,7 +282,7 @@ export async function createRuntime(
       sync?.request();
     }
   }
-  async function startSync() {
+  async function startSync(recovery?: import('@ainotation/schema').SyncRequest['recovery']) {
     sync?.stop();
     sync = undefined;
     const token = ++syncGeneration;
@@ -300,6 +305,20 @@ export async function createRuntime(
         ? (syncSignal) => development.resolve(syncSignal)
         : currentConnection!,
       sessionId: bound.document.id,
+      recovery,
+      async onRecovery(response) {
+        if (token !== syncGeneration || disposed || !response.storageEpoch || !response.recovery)
+          return;
+        const next = await store.update(key, url, (record) => ({
+          ...record,
+          syncRecovery: {
+            epoch: response.storageEpoch!,
+            revision: response.recovery!.revision,
+            server: response.document,
+          },
+        }));
+        if (token === syncGeneration && !disposed) accept(next);
+      },
       read: () => store.read(key, url),
       async apply(response, images) {
         if (token !== syncGeneration || disposed) return;
@@ -309,6 +328,8 @@ export async function createRuntime(
       onState(state, text) {
         if (token === syncGeneration && !disposed) {
           view.connection = state;
+          if (state === 'error') view.syncProblem = text;
+          else delete view.syncProblem;
           message(text);
         }
       },
@@ -350,6 +371,7 @@ export async function createRuntime(
   }
   function disconnect() {
     if (localOnly) return;
+    projectRecovery?.abort();
     sync?.stop();
     sync = undefined;
     connection = null;
@@ -361,10 +383,12 @@ export async function createRuntime(
     }
     view.connection = 'offline';
     view.syncing = false;
+    delete view.syncProblem;
     message(msg('localOnly'));
   }
   async function connect(value: McpConnection) {
     if (localOnly) return;
+    projectRecovery?.abort();
     connection = normalizeConnection(value);
     view.endpoint = connection.endpoint;
     try {
@@ -375,6 +399,76 @@ export async function createRuntime(
     await startSync();
   }
   const downloads = createFeedbackDownloads();
+  async function recoverProject() {
+    if (localOnly || view.recoveringProject || (!connection && !development)) return;
+    const controller = new AbortController();
+    projectRecovery = controller;
+    const recoverySignal = AbortSignal.any([signal, controller.signal]);
+    const currentConnection = connection;
+    view.recoveringProject = true;
+    view.recoveryPages = [];
+    render();
+    try {
+      const documents = await store.readProjectDocuments(project);
+      for (
+        let index = 0;
+        index < documents.length && !disposed && !recoverySignal.aborted;
+        index++
+      ) {
+        const document = documents[index]!;
+        const key = keyFor(document.url);
+        const bound = await store.bindAuthority(
+          key,
+          document.url,
+          development?.authority ?? currentConnection!.endpoint,
+        );
+        if (disposed || recoverySignal.aborted) return;
+        let failed = false;
+        const client = createSyncClient({
+          connection: development ? (signal) => development.resolve(signal) : currentConnection!,
+          sessionId: bound.document.id,
+          once: true,
+          read: () => store.read(key, document.url),
+          async apply(response, images) {
+            const next = await store.applySync(key, document.url, response, images);
+            if (key === pageKey && !disposed) accept(next);
+          },
+          async onRecovery(response) {
+            if (!response.storageEpoch || !response.recovery) return;
+            const next = await store.update(key, document.url, (record) => ({
+              ...record,
+              syncRecovery: {
+                server: response.document,
+                epoch: response.storageEpoch!,
+                revision: response.recovery!.revision,
+              },
+            }));
+            if (key === pageKey && !disposed) accept(next);
+          },
+          onState(state) {
+            if (state === 'error') failed = true;
+          },
+          onSync() {},
+        });
+        const stop = () => client.stop();
+        recoverySignal.addEventListener('abort', stop, { once: true });
+        try {
+          await client.finished;
+        } finally {
+          client.stop();
+          recoverySignal.removeEventListener('abort', stop);
+        }
+        if (disposed || recoverySignal.aborted) return;
+        if (failed) view.recoveryPages.push(document.url);
+        message(msg('syncProjectProgress', index + 1, documents.length));
+      }
+      if (view.recoveryPages.length) message(msg('syncProjectReview'));
+    } finally {
+      if (projectRecovery === controller) projectRecovery = undefined;
+      view.recoveringProject = false;
+      render();
+    }
+  }
   async function copy() {
     if (reconcilePage()) throw uiError('pageLoading');
     if (!record) throw uiError('feedbackLoading');
@@ -412,6 +506,29 @@ export async function createRuntime(
     if (action.type === 'connect') {
       if (development) return;
       await connect(action);
+      return;
+    }
+    if (action.type === 'retry-sync' || action.type === 'resolve-recovery') {
+      if (localOnly) return;
+      const pending = record?.syncRecovery;
+      await startSync(
+        action.type === 'resolve-recovery' && pending
+          ? { epoch: pending.epoch, revision: pending.revision, source: action.source }
+          : undefined,
+      );
+      return;
+    }
+    if (action.type === 'recover-project') {
+      await recoverProject();
+      return;
+    }
+    if (action.type === 'export-recovery') {
+      const copy = record?.recoveryCopies?.at(-1);
+      if (copy) {
+        if (copy.document.annotations.some((annotation) => annotation.images?.length))
+          await downloads.exportImages(copy.document, copy.images);
+        else downloads.exportJson(copy.document);
+      }
       return;
     }
     if (action.type === 'disconnect') {
@@ -657,6 +774,7 @@ export async function createRuntime(
   shell.addEventListener('ainotation-action', onAction);
   function destroy() {
     if (disposed) return;
+    projectRecovery?.abort();
     preferences.destroy();
     disposed = true;
     drawing?.abort();

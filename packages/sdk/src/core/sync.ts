@@ -1,8 +1,8 @@
 import { SyncResponseSchema } from '@ainotation/schema';
 import type { DraftRecord } from './storage';
-import type { SyncResponse } from '@ainotation/schema';
+import type { SyncResponse, SyncRequest } from '@ainotation/schema';
 import { syncImages } from './image-sync';
-import { uiError, msg, type UiMessage } from '../i18n';
+import { uiError, msg, errorMessage, type UiMessage } from '../i18n';
 
 export interface McpConnection {
   endpoint: string;
@@ -53,6 +53,9 @@ export function createSyncClient(options: {
   apply: (response: SyncResponse, images: Record<string, Blob>) => Promise<void>;
   onState: (state: 'connecting' | 'connected' | 'error', message: UiMessage) => void;
   onSync: (syncing: boolean) => void;
+  onRecovery?: (response: SyncResponse) => Promise<void>;
+  recovery?: SyncRequest['recovery'];
+  once?: boolean;
 }) {
   const controller = new AbortController();
   const configured = options.connection;
@@ -64,6 +67,9 @@ export function createSyncClient(options: {
           return async () => connection;
         })();
   let stopped = false;
+  let paused = false;
+  let recovery = options.recovery;
+  let problem: UiMessage | undefined;
   const uploaded = new Set<string>();
   let wanted = false;
   let running: Promise<void> | undefined;
@@ -74,7 +80,7 @@ export function createSyncClient(options: {
     running = (async () => {
       options.onSync(true);
       try {
-        while (wanted && !stopped) {
+        while (wanted && !stopped && !paused) {
           wanted = false;
           const record = await options.read();
           if (stopped) return;
@@ -91,12 +97,30 @@ export function createSyncClient(options: {
               credentials: 'omit',
               redirect: 'error',
               cache: 'no-store',
-              body: JSON.stringify({ document: record.document, operations: record.operations }),
+              body: JSON.stringify({
+                document: record.document,
+                operations: record.operations,
+                storageEpoch: record.storageEpoch,
+                ...(recovery ? { recovery } : {}),
+              }),
               signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
             },
           );
           if (!response.ok) {
-            await response.body?.cancel();
+            const diagnostic = (await response.json().catch(() => ({}))) as { code?: string };
+            if (diagnostic.code === 'recovery-stale' && recovery) {
+              recovery = undefined;
+              wanted = true;
+              continue;
+            }
+            if (
+              diagnostic.code?.startsWith('storage-') ||
+              diagnostic.code === 'service-ownership'
+            ) {
+              paused = true;
+              problem = msg('syncStorageFailed');
+              throw uiError('syncStorageFailed');
+            }
             throw new Error(
               `MCP sync failed (${response.status}). Check pairing token, allowed origin and request size.`,
             );
@@ -104,6 +128,14 @@ export function createSyncClient(options: {
           const data = SyncResponseSchema.parse(await response.json());
           if (data.document.id !== options.sessionId || data.document.url !== record.document.url)
             throw new Error('MCP returned another session.');
+          if (data.recovery) {
+            paused = true;
+            await options.onRecovery?.(data);
+            options.onState('error', msg('syncRecoveryNeeded'));
+            return;
+          }
+          recovery = undefined;
+          if (data.storageEpoch && data.storageEpoch !== record.storageEpoch) uploaded.clear();
           // Text/deletions must remain usable when metadata arrives before its
           // image bytes, or an attachment transfer fails and needs a retry.
           if (!stopped) await options.apply(data, {});
@@ -114,6 +146,7 @@ export function createSyncClient(options: {
             connection,
             signal: controller.signal,
             uploaded,
+            ...(data.missingImages ? { missing: data.missingImages } : {}),
           });
           if (!stopped && Object.keys(images).length) await options.apply(data, images);
         }
@@ -125,10 +158,10 @@ export function createSyncClient(options: {
     return running;
   };
   const request = () => {
-    if (!stopped)
-      void sync().catch(() => {
+    if (!stopped && !paused)
+      void sync().catch((error: unknown) => {
         if (stopped) return;
-        options.onState('error', msg('syncFailed'));
+        options.onState('error', problem ?? errorMessage(error, 'syncFailed'));
         streaming?.abort();
       });
   };
@@ -142,8 +175,8 @@ export function createSyncClient(options: {
       const timer = setTimeout(done, 2500);
       controller.signal.addEventListener('abort', done, { once: true });
     });
-  void (async () => {
-    while (!stopped) {
+  const finished = (async () => {
+    while (!stopped && !paused) {
       options.onState('connecting', msg('syncConnecting'));
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -153,7 +186,11 @@ export function createSyncClient(options: {
       };
       try {
         await sync();
-        if (stopped) break;
+        if (stopped || paused) break;
+        if (options.once) {
+          options.onState('connected', msg('syncConnected'));
+          break;
+        }
         const connection = await resolveConnection();
         if (stopped) break;
         streaming = new AbortController();
@@ -190,18 +227,20 @@ export function createSyncClient(options: {
             if (event.includes('event: changed')) request();
           }
         }
-      } catch {
+      } catch (error) {
         uploaded.clear();
-        if (!stopped) options.onState('error', msg('syncUnavailable'));
+        if (!stopped) options.onState('error', problem ?? errorMessage(error, 'syncUnavailable'));
       } finally {
         clearTimeout(watchdog);
         await reader?.cancel().catch(() => {});
         reader?.releaseLock();
       }
-      if (!stopped) await delay();
+      if (options.once) break;
+      if (!stopped && !paused) await delay();
     }
   })();
   return {
+    finished,
     request,
     stop() {
       stopped = true;

@@ -1,6 +1,7 @@
 import { MAX_IMAGE_BYTES, type FeedbackDocument } from '@ainotation/schema';
 import type { McpConnection } from './sync';
 import { verifyImage } from './images';
+import { uiError } from '../i18n';
 
 export async function syncImages(options: {
   document: FeedbackDocument;
@@ -8,6 +9,7 @@ export async function syncImages(options: {
   connection: McpConnection;
   signal: AbortSignal;
   uploaded: Set<string>;
+  missing?: string[];
 }): Promise<Record<string, Blob>> {
   const blobs: Record<string, Blob> = {};
   const { connection, signal, uploaded } = options;
@@ -23,7 +25,7 @@ export async function syncImages(options: {
   for (const image of images.values()) {
     const key = keyFor(image.id, image.sha256);
     const local = options.local[image.id];
-    if (local && uploaded.has(key)) continue;
+    if (local && uploaded.has(key) && !options.missing?.includes(image.id)) continue;
     if (local) await verifyImage(local, image);
     const response = await fetch(
       `${connection.endpoint}/sessions/${options.document.id}/images/${image.id}`,
@@ -42,6 +44,7 @@ export async function syncImages(options: {
     );
     if (!response.ok) {
       await response.body?.cancel();
+      if (response.status === 404 && !local) throw uiError('syncImagesMissing');
       throw new Error(`Image synchronization failed (${response.status}).`);
     }
     if (local) {

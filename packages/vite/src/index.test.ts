@@ -7,11 +7,122 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { declareProject, initializeProject } from '@ainotation/mcp/project';
-import { startSharedService } from '@ainotation/mcp/service';
+import { startSharedService, serviceOwnerPaths } from '@ainotation/mcp/service';
 import { createProjectMcpServer } from '@ainotation/mcp/bridge';
 import type { InspectorShell } from '@ainotation/sdk/ui';
 import { createFeedbackDocument } from '@ainotation/schema';
 import { ainotation } from './index';
+
+it('restores deleted service files and images, then resolves a backup rollback through Settings', async () => {
+  const { apps, shared } = await setup();
+  const app = apps[0]!;
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  cleanup.push(() => browser.close());
+  const page = await browser.newPage({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
+  page.setDefaultTimeout(10000);
+  await page.goto(app.url);
+  const shell = page.locator('ainotation-inspector-shell');
+  await expect
+    .poll(() => shell.evaluate((el) => (el as InspectorShell).view.connection), { timeout: 15000 })
+    .toBe('connected');
+  await shell.getByRole('button', { name: 'Open inspector', exact: true }).click();
+  await page.locator('#heading').click();
+  const markers = page.locator('[data-ainotation-ui="markers"]');
+  const text = markers.getByRole('textbox', { name: 'Feedback content', exact: true });
+  await text.fill('Original recovery note');
+  const png = await page.evaluate(() => {
+    const canvas = window.document.createElement('canvas');
+    canvas.width = canvas.height = 32;
+    canvas.getContext('2d')!.fillRect(0, 0, 32, 32);
+    return canvas.toDataURL('image/png').split(',')[1]!;
+  });
+  await markers.locator('input[type="file"]').setInputFiles({
+    name: 'recovery.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(png, 'base64'),
+  });
+  await page
+    .locator('[data-ainotation-ui="drawing"]')
+    .getByRole('button', { name: 'Attach image', exact: true })
+    .click();
+  await markers.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect
+    .poll(() => shell.evaluate((el) => (el as InspectorShell).view.document?.annotations.length))
+    .toBe(1);
+  const document = await shell.evaluate((el) => (el as InspectorShell).view.document!);
+  const image = document.annotations[0]!.images![0]!;
+  const filePath = join(
+    shared.directory,
+    'projects',
+    app.project.config.projectId,
+    'feedback.json',
+  );
+  const imagePath = join(`${filePath}.images`, document.id, `${image.id}.png`);
+  await expect
+    .poll(() =>
+      readFile(imagePath)
+        .then((bytes) => bytes.toString('base64'))
+        .catch(() => ''),
+    )
+    .toBe(png);
+  await rm(shared.directory, { recursive: true });
+  await expect
+    .poll(
+      () =>
+        readFile(imagePath)
+          .then((bytes) => bytes.toString('base64'))
+          .catch(() => ''),
+      { timeout: 10000 },
+    )
+    .toBe(png);
+  expect(
+    JSON.parse(await readFile(join(shared.directory, 'connection.json'), 'utf8')).instanceId,
+  ).toBe(shared.connection.instanceId);
+  await markers.getByRole('button', { name: 'Edit annotation 1', exact: true }).click();
+  await text.fill('Latest browser version');
+  await markers.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect
+    .poll(() =>
+      readFile(filePath, 'utf8').then(
+        (body) => JSON.parse(body).sessions[0].document.annotations[0].comment,
+      ),
+    )
+    .toBe('Latest browser version');
+  await shared.close();
+  await writeFile(filePath, '{interrupted');
+  const restarted = await startSharedService({ directory: shared.directory });
+  cleanup.push(restarted.close);
+  await expect
+    .poll(() => shell.evaluate((el) => (el as InspectorShell).view.recoveryNeeded), {
+      timeout: 20000,
+    })
+    .toBe(true);
+  expect(
+    await shell.evaluate((el) => (el as InspectorShell).view.document!.annotations[0]!.comment),
+  ).toBe('Latest browser version');
+  await shell.getByRole('button', { name: 'Settings', exact: true }).click();
+  await shell.locator('details').nth(0).locator('summary').click();
+  await shell.locator('details').nth(1).locator('summary').click();
+  expect(await shell.locator('details').nth(0).textContent()).toContain('Latest browser version');
+  expect(await shell.locator('details').nth(1).textContent()).toContain('Original recovery note');
+  await shell.locator('#inspector-settings').screenshot({
+    path: join(import.meta.dirname, '../../../output/playwright/recovery-settings.png'),
+  });
+  await shell.getByRole('button', { name: 'Use browser version', exact: true }).click();
+  await expect
+    .poll(() => shell.evaluate((el) => (el as InspectorShell).view.connection), { timeout: 15000 })
+    .toBe('connected');
+  expect(await shell.evaluate((el) => (el as InspectorShell).view.recoveryNeeded)).toBe(false);
+  expect(
+    await shell
+      .getByRole('button', { name: 'Export previous local version', exact: true })
+      .isVisible(),
+  ).toBe(true);
+  expect(
+    JSON.parse(await readFile(filePath, 'utf8')).sessions[0].document.annotations[0].comment,
+  ).toBe('Latest browser version');
+  expect(await readFile(imagePath)).toEqual(Buffer.from(png, 'base64'));
+});
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -47,7 +158,7 @@ async function setup(offline = false, legacy = false) {
           ...(offline ? { serviceCliPath: join(root, 'missing-cli.mjs') } : {}),
         }),
       ],
-      server: { host: '127.0.0.1', port: 0, fs: { allow: [root] } },
+      server: { host: '127.0.0.1', port: 0, fs: { allow: [root, serviceOwnerPaths(root).root] } },
       logLevel: 'silent',
     });
     cleanup.push(() => server.close());
@@ -73,7 +184,10 @@ it('automatically mounts and syncs two projects to their scoped MCP clients with
   const savedIds: string[] = [];
   for (const app of apps) {
     expect(await readdir(app.directory)).not.toContain('ainotation.config.json');
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: 'en-US',
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     page.setDefaultTimeout(7000);
     page.setDefaultNavigationTimeout(20000);
@@ -201,6 +315,8 @@ it('rejects cross-origin bootstrap and limits browser proxy routes to sync and e
   const b = apps[1]!;
   const handshake = `${a.url}__ainotation/connect`;
   const protectedFile = await fetch(`${a.url}@fs/${shared.directory}/connection.json`);
+  const coordinatorFile = await fetch(`${a.url}@fs/${serviceOwnerPaths(shared.directory).record}`);
+  expect(coordinatorFile.status).toBe(403);
   const protectedBody = await protectedFile.text();
   expect(
     protectedFile.status,
@@ -365,7 +481,7 @@ it('keeps local annotations usable while the shared service is unavailable', asy
   await shared.close();
   const browser = await chromium.launch({ channel: 'chrome', headless: true });
   cleanup.push(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const page = await browser.newPage({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
   page.setDefaultTimeout(7000);
   await page.goto(apps[0]!.url);
   const shell = page.locator('ainotation-inspector-shell');

@@ -1,5 +1,10 @@
 # @ainotation/mcp
 
+Storage recovery commands: `ainotation-mcp doctor`, `ainotation-mcp repair`, and
+`ainotation-mcp backup --to DIRECTORY --keep 3`. The service repairs missing live
+state, retains validated JSON backups, and coordinates outside its data directory.
+See [recovery documentation](https://github.com/nightire/ainotation/blob/main/RECOVERY.md).
+
 Local MCP service for Ainotation feedback and PNG attachments. Requires Node.js
 24.20+; the HTTP service binds to loopback and uses project-scoped authentication.
 

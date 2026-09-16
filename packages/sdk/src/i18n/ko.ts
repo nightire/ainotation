@@ -46,6 +46,25 @@ export const ko = {
   switchTheme: (name: string) => `${name} 테마로 전환`,
   connection: 'MCP 연결',
   localMode: '로컬 전용',
+  syncStorageFailed:
+    '로컬에 저장되었습니다. 서비스 저장소를 복구하려면 ainotation-mcp doctor를 실행한 후 다시 시도하세요.',
+  syncRecoveryNeeded:
+    '로컬에 저장되었습니다. 서비스에서 다른 버전을 복구하여 동기화가 일시 중지되었습니다.',
+  syncImagesMissing:
+    '피드백은 저장되었지만 일부 이미지 파일이 없습니다. 이미지를 보관 중인 브라우저를 열어 다시 업로드하세요.',
+  retrySync: '연결 재시도',
+  recoverProject: '현재 브라우저에서 프로젝트 복구',
+  exportRecovery: '이전 로컬 버전 내보내기',
+  recoveryLocalPreview: (count: number) => `브라우저 버전 (주석 ${count}개)`,
+  recoveryServerPreview: (count: number) => `복구된 서버 버전 (주석 ${count}개)`,
+  syncProjectProgress: (done: number, total: number) =>
+    `저장된 페이지 ${total}개 중 ${done}개를 확인했습니다.`,
+  syncProjectReview:
+    '일부 페이지를 확인해야 합니다. 해당 페이지를 열어 버전이나 누락된 이미지를 확인하세요.',
+  recoveryHelp:
+    '먼저 복사본을 내보낸 후 이 페이지에서 유지할 버전을 선택하세요. 서비스는 양쪽 피드백 스냅샷을 보관합니다.',
+  recoveryBrowser: '브라우저 버전 사용',
+  recoveryServer: '복구된 서버 버전 사용',
   localModeDescription:
     '피드백은 현재 브라우저에 저장됩니다. 복사하거나 내보내서 공유할 수 있습니다.',
   automaticConnected: '개발 서버를 통해 연결되었습니다.',

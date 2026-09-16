@@ -11,7 +11,7 @@ it('restores the shared dragged position after remount and refresh, including to
     const address = web.httpServer?.address();
     if (!address || typeof address === 'string') throw new Error('Missing server address');
     browser = await chromium.launch({ channel: 'chrome', headless: true });
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const page = await browser.newPage({ locale: 'en-US', viewport: { width: 1280, height: 900 } });
     const errors: string[] = [];
     configurePage(page, errors);
     await page.goto(`http://127.0.0.1:${address.port}`);

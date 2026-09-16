@@ -50,7 +50,10 @@ it('runs real React and Vue apps with automatic SDK injection and separate MCP f
       await server.listen();
       const address = server.httpServer!.address();
       if (!address || typeof address === 'string') throw new Error('Missing server address');
-      const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+      const page = await browser.newPage({
+        locale: 'en-US',
+        viewport: { width: 1280, height: 900 },
+      });
       configurePage(page, pageErrors);
       await page.goto(`http://127.0.0.1:${address.port}/`);
       const shell = page.locator('ainotation-inspector-shell');

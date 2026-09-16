@@ -8,6 +8,40 @@ import { canvasBlob, describeImage } from './images';
 const stores: DraftStore[] = [];
 const keys: string[] = [];
 
+it('preserves local feedback and image blobs before accepting a recovered server version', async () => {
+  const store = await openStore();
+  const key = pageKey();
+  const original = await store.load(key, location.href);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 16;
+  const blob = await canvasBlob(canvas);
+  const image = await describeImage(blob, 'import');
+  const note = { ...annotation('Local version'), images: [image] };
+  const epoch = crypto.randomUUID();
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    document: { ...record.document, annotations: [note] },
+    images: { [image.id]: blob },
+    syncRecovery: { epoch, revision: 'a'.repeat(64) },
+  }));
+  const response = {
+    document: { ...original.document, annotations: [] },
+    acknowledged: [],
+    storageEpoch: epoch,
+  };
+  await expect(
+    store.applySync(key, location.href, { ...response, recovery: { revision: 'a'.repeat(64) } }),
+  ).rejects.toThrow('resolved');
+  await store.applySync(key, location.href, response);
+  const reopened = await openStore();
+  const record = await reopened.read(key, location.href);
+  expect(record.document.annotations).toEqual([]);
+  expect(record.syncRecovery).toBeUndefined();
+  expect(record.storageEpoch).toBe(epoch);
+  expect(record.recoveryCopies?.at(-1)?.document.annotations).toEqual([note]);
+  expect(record.recoveryCopies?.at(-1)?.images[image.id]?.size).toBe(blob.size);
+});
+
 async function openStore() {
   const onUnavailable = vi.fn();
   const store = await createDraftStore({ onUnavailable, onExternalChange: vi.fn() });

@@ -1,12 +1,17 @@
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 import type { Ainotation } from './index.js';
 
 const instances: Ainotation[] = [];
 const containers: HTMLElement[] = [];
 
+beforeEach(() => {
+  vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US']);
+});
+
 afterEach(() => {
   for (const instance of instances.splice(0)) instance.destroy();
   for (const container of containers.splice(0)) container.remove();
+  vi.restoreAllMocks();
 });
 
 describe('SDK lifecycle', () => {

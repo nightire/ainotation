@@ -29,6 +29,7 @@ it('persists and exports multiple annotations with MCP CRUD but no conversation 
     await mcp.connect(serverTransport);
     await client.connect(clientTransport);
     const context = await browser.newContext({
+      locale: 'en-US',
       viewport: { width: 1280, height: 900 },
       permissions: ['clipboard-read', 'clipboard-write'],
     });

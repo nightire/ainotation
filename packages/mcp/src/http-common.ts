@@ -31,6 +31,16 @@ export function sendError(response: ServerResponse, error: unknown): void {
   const status =
     error instanceof StoreError ? error.status : error instanceof z.ZodError ? 400 : 500;
   sendJson(response, status, {
+    code:
+      error instanceof StoreError
+        ? error.code
+        : error instanceof Error &&
+            'code' in error &&
+            ['ENOSPC', 'EACCES', 'EPERM', 'EROFS'].includes(String(error.code))
+          ? 'storage-unavailable'
+          : error instanceof Error && 'code' in error && error.code === 'AINOTATION_STORAGE_DAMAGED'
+            ? 'storage-damaged'
+            : undefined,
     error:
       error instanceof StoreError
         ? error.message

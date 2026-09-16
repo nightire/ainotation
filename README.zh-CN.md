@@ -84,6 +84,8 @@ npx --yes @ainotation/mcp@beta connect
 
 Agent 可以发现项目、读取反馈和图片，以及新增、修改、删除标注。你也可以通过 **复制反馈** 或 **导出** 手动分享。
 
+遇到文件丢失、服务异常或存储损坏时，可使用 `ainotation-mcp doctor` 和 `ainotation-mcp repair`。Settings 也提供重试连接及从当前浏览器恢复项目的入口。冲突处理与外部备份操作见[可靠性与恢复说明](./RECOVERY.md)。
+
 ### 同一工作区内的多个应用
 
 为每个应用设置不同的项目名称。如果希望重命名后保持身份不变，可额外提供稳定的 `id`：

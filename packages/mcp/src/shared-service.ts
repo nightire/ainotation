@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -7,6 +7,10 @@ import { writePrivateJson } from './atomic-json';
 import { createProjectService } from './project-service';
 import { startProjectHttpServer } from './project-http';
 import { ProjectError } from './project';
+import { acquireOwner, removeOwnedFile } from './service-owner';
+import { StoreError } from './store';
+import { exists } from './recovery-json';
+export { ownerPaths as serviceOwnerPaths } from './service-owner';
 
 export const ServiceConnectionSchema = z
   .object({
@@ -56,10 +60,19 @@ export async function startSharedService(
   const directory = await realpath(requested);
   const lockPath = join(directory, 'service.lock');
   const connectionPath = join(directory, 'connection.json');
+  const instanceId = randomUUID();
+  const identity = { instanceId, pid: process.pid };
+  const owner = await acquireOwner(directory, identity);
   let lock;
   try {
+    if (await exists(join(directory, 'restore.pending.json'))) {
+      throw new ProjectError(
+        'An external restore was interrupted. Run repair --restore-from with the same snapshot before starting the service.',
+      );
+    }
     lock = await open(lockPath, 'wx', 0o600);
   } catch (error) {
+    await owner.close();
     if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
       throw new ProjectError(
         'This service directory is already locked. If a previous service crashed, verify it has stopped before removing service.lock.',
@@ -67,22 +80,77 @@ export async function startSharedService(
     }
     throw error;
   }
-  const instanceId = randomUUID();
   const token = randomBytes(32).toString('hex');
   let service: Awaited<ReturnType<typeof createProjectService>> | undefined;
   let http: Awaited<ReturnType<typeof startProjectHttpServer>> | undefined;
   let closing: Promise<void> | undefined;
+  let connection: ServiceConnection | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let repairing: Promise<void> | undefined;
+  let maintenanceHealthy = true;
+  async function ownership() {
+    if (!connection || closing) return;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    for (const [path, value] of [
+      [lockPath, identity],
+      [connectionPath, connection],
+    ] as const) {
+      try {
+        const saved = JSON.parse(await readFile(path, 'utf8')) as {
+          instanceId?: string;
+          pid?: number;
+        };
+        if (saved.instanceId !== instanceId || saved.pid !== process.pid)
+          throw new ProjectError(
+            'Service ownership changed. Run ainotation-mcp doctor before reconnecting.',
+          );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+          throw new StoreError(
+            503,
+            'Service ownership metadata needs repair. Run ainotation-mcp doctor.',
+            'service-ownership',
+          );
+        await writePrivateJson(path, value);
+      }
+    }
+  }
+  function repair() {
+    if (closing) return Promise.reject(new StoreError(503, 'Service is closing'));
+    repairing ??= (async () => {
+      try {
+        await ownership();
+        await service?.repair();
+        maintenanceHealthy = true;
+      } catch (error) {
+        maintenanceHealthy = false;
+        throw error;
+      }
+    })().finally(() => {
+      repairing = undefined;
+    });
+    return repairing;
+  }
   const close = (): Promise<void> => {
     closing ??= (async () => {
+      clearInterval(timer);
       try {
+        await repairing?.catch(() => {});
         await http?.close();
         await service?.close();
       } finally {
         try {
-          await rm(connectionPath, { force: true });
+          await removeOwnedFile(connectionPath, instanceId);
         } finally {
-          await lock.close();
-          await rm(lockPath, { force: true });
+          try {
+            await lock.close();
+          } finally {
+            try {
+              await removeOwnedFile(lockPath, instanceId);
+            } finally {
+              await owner.close();
+            }
+          }
         }
       }
     })();
@@ -99,9 +167,12 @@ export async function startSharedService(
       service,
       controlToken: token,
       instanceId,
+      beforeRequest: ownership,
+      repair,
+      maintenanceHealthy: () => maintenanceHealthy,
       ...(options.port !== undefined ? { port: options.port } : {}),
     });
-    const connection = ServiceConnectionSchema.parse({
+    connection = ServiceConnectionSchema.parse({
       version: 1,
       instanceId,
       pid: process.pid,
@@ -109,7 +180,12 @@ export async function startSharedService(
       token,
     });
     await writePrivateJson(connectionPath, connection);
-    return { directory, connection, close };
+    await owner.publish(connection);
+    timer = setInterval(() => {
+      void repair().catch(() => {});
+    }, 2000);
+    timer.unref();
+    return { directory, connection, close, repair };
   } catch (error) {
     await close();
     throw error;

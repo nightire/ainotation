@@ -1,5 +1,5 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test';
 
 import { createAinotation, type Ainotation } from './index';
 import type { DraftRecord } from './core/storage';
@@ -9,6 +9,10 @@ import type { InspectorShell } from './ui';
 const instances: Ainotation[] = [];
 const fixtures: HTMLElement[] = [];
 const databases: { db: IDBPDatabase; pageKeys: string[] }[] = [];
+
+beforeEach(() => {
+  vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US']);
+});
 
 function action(shell: InspectorShell, detail: InspectorAction) {
   shell.dispatchEvent(
@@ -133,6 +137,95 @@ afterEach(async () => {
 });
 
 describe('mounted feedback runtime', () => {
+  it('recovers saved project pages without navigating to each page', async () => {
+    const { shell, buttons, read, projectId, pageKeys } = await setup();
+    select(buttons[0]!);
+    await save(shell, 'Current page');
+    const first = (await read())!;
+    const otherUrl = `${location.origin}/other-recovery-page`;
+    const otherKey = JSON.stringify([projectId, otherUrl]);
+    pageKeys.push(otherKey);
+    await databases.at(-1)!.db.put(
+      'pages',
+      {
+        ...first,
+        document: {
+          ...first.document,
+          id: crypto.randomUUID(),
+          url: otherUrl,
+          annotations: first.document.annotations.map((annotation) => ({
+            ...annotation,
+            id: crypto.randomUUID(),
+            comment: 'Other saved page',
+            page: { ...annotation.page, url: otherUrl },
+          })),
+        },
+        operations: [],
+      },
+      otherKey,
+    );
+    const posted: string[] = [];
+    const epoch = crypto.randomUUID();
+    vi.spyOn(window, 'fetch').mockImplementation(async (_url, init) => {
+      if (init?.method === 'POST') {
+        const request = JSON.parse(init.body as string) as {
+          document: import('@ainotation/schema').FeedbackDocument;
+          operations: { id: string }[];
+        };
+        posted.push(request.document.url);
+        return Response.json({
+          document: request.document,
+          acknowledged: request.operations.map((operation) => operation.id),
+          storageEpoch: epoch,
+          missingImages: [],
+        });
+      }
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener('abort', () => controller.error(new Error('Stopped')), {
+              once: true,
+            });
+          },
+        }),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    });
+    action(shell, {
+      type: 'connect',
+      endpoint: 'http://127.0.0.1:4748',
+      token: 'recovery-test-token',
+    });
+    await vi.waitFor(() => expect(shell.view.connection).toBe('connected'));
+    action(shell, { type: 'recover-project' });
+    await vi.waitFor(() => {
+      expect(shell.view.recoveringProject).toBe(false);
+      expect(shell.view.message).toBe('Checked 2 of 2 saved pages.');
+    });
+    expect(posted).toContain(otherUrl);
+    expect(shell.view.recoveryPages).toEqual([]);
+    expect(location.href).toBe(first.document.url);
+    const beforeCancellation = await read();
+    let transferSignal: AbortSignal | undefined;
+    vi.spyOn(window, 'fetch').mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          transferSignal = init?.signal ?? undefined;
+          transferSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Cancelled', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    action(shell, { type: 'recover-project' });
+    await vi.waitFor(() => expect(transferSignal).toBeDefined());
+    action(shell, { type: 'disconnect' });
+    await vi.waitFor(() => expect(shell.view.recoveringProject).toBe(false));
+    expect(transferSignal?.aborted).toBe(true);
+    expect(await read()).toEqual(beforeCancellation);
+  });
+
   it('keeps local-only feedback and images usable without restoring or changing MCP credentials', async () => {
     const projectId = crypto.randomUUID();
     const credentialsKey = `ainotation:mcp:${projectId}`;

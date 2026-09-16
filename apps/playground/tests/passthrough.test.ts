@@ -11,7 +11,10 @@ async function withPicker(run: (page: Page) => Promise<void>) {
     const address = web.httpServer?.address();
     if (!address || typeof address === 'string') throw new Error('No test server address');
     browser = await chromium.launch({ channel: 'chrome', headless: true });
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const context = await browser.newContext({
+      locale: 'en-US',
+      viewport: { width: 1280, height: 900 },
+    });
     const page = await context.newPage();
     const errors: string[] = [];
     configurePage(page, errors);

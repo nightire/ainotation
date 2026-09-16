@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile, stat, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
@@ -16,6 +16,8 @@ import {
   MAX_IMAGE_PIXELS,
 } from '@ainotation/schema';
 import { z } from 'zod';
+import { readSnapshot, writeSnapshot, exists } from './recovery-json';
+import { writePrivateJson } from './atomic-json';
 
 const MAX_SESSIONS = 100;
 const MAX_OPERATION_IDS = 10000;
@@ -30,6 +32,7 @@ const SessionSchema = z
 const FileSchema = z
   .object({
     version: z.literal(1),
+    storageEpoch: z.uuid().optional(),
     sessions: z.array(SessionSchema).max(MAX_SESSIONS),
   })
   .strict();
@@ -70,6 +73,7 @@ export class StoreError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'StoreError';
@@ -117,10 +121,13 @@ export class FeedbackStore {
   private sessions = new Map<string, Session>();
   private queue: Promise<void> = Promise.resolve();
   private listeners = new Map<string, Set<() => void>>();
+  private stamp = '';
+  private missing = new Map<string, string>();
 
   constructor(
     private readonly filePath?: string,
     sessions: Session[] = [],
+    readonly storageEpoch: string = randomUUID(),
   ) {
     for (const session of sessions) {
       validateSession(session);
@@ -135,6 +142,99 @@ export class FeedbackStore {
 
   async flush(): Promise<void> {
     await this.queue;
+  }
+
+  private snapshot() {
+    return {
+      version: 1 as const,
+      storageEpoch: this.storageEpoch,
+      sessions: [...this.sessions.values()],
+    };
+  }
+  private async fileStamp() {
+    if (!this.filePath) return '';
+    try {
+      const value = await stat(this.filePath);
+      return `${value.ino}:${value.mtimeMs}:${value.size}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+      throw error;
+    }
+  }
+  private async checkpoint(force = false) {
+    if (!this.filePath) return;
+    const stamp = await this.fileStamp();
+    if (!force && stamp && stamp === this.stamp) return;
+    if (!force && stamp) {
+      let disk;
+      try {
+        disk = parseFeedbackFile(JSON.parse(await readFile(this.filePath, 'utf8')));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code) throw error;
+        await rename(this.filePath, `${this.filePath}.corrupt-${randomUUID()}`);
+      }
+      if (disk && !isDeepStrictEqual(disk, this.snapshot()))
+        throw new StoreError(
+          409,
+          'Storage changed outside this service. Run ainotation-mcp doctor.',
+          'storage-conflict',
+        );
+      if (disk) {
+        this.stamp = stamp;
+        return;
+      }
+    }
+    await writeSnapshot(this.filePath, this.snapshot());
+    this.stamp = await this.fileStamp();
+  }
+  async repair(force = false) {
+    await this.mutate(async () => {
+      await this.checkpoint(force);
+      for (const session of this.sessions.values()) {
+        if (!this.listeners.get(session.document.id)?.size) continue;
+        const missing = await this.missingImages(session.document);
+        const signature = missing.sort().join(',');
+        if (signature && this.missing.get(session.document.id) !== signature)
+          for (const listener of this.listeners.get(session.document.id) ?? []) {
+            try {
+              listener();
+            } catch {
+              /* A disconnected observer cannot break repair. */
+            }
+          }
+        this.missing.set(session.document.id, signature);
+      }
+    });
+  }
+
+  async missingImages(document: FeedbackDocument): Promise<string[]> {
+    const missing: string[] = [];
+    for (const image of document.annotations.flatMap((annotation) => annotation.images ?? [])) {
+      if (this.filePath) {
+        try {
+          if ((await stat(this.imagePath(document.id, image.id))).size !== image.size)
+            missing.push(image.id);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') missing.push(image.id);
+          else throw error;
+        }
+      } else if (!this.images.has(`${document.id}/${image.id}`)) missing.push(image.id);
+    }
+    return [...new Set(missing)];
+  }
+  private async preserveRecovery(document: FeedbackDocument) {
+    if (!this.filePath) return;
+    const directory = `${this.filePath}.recovery`;
+    const hash = createHash('sha256').update(JSON.stringify(document)).digest('hex');
+    const path = join(directory, `${document.id}-${hash}.json`);
+    if (await exists(path)) return;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    if ((await readdir(directory)).length >= 100)
+      throw new StoreError(
+        409,
+        'Recovery snapshot limit reached. Export and archive recovery files before retrying.',
+      );
+    await writePrivateJson(path, document);
   }
 
   get(sessionId: string, origin?: string): FeedbackDocument {
@@ -204,6 +304,7 @@ export class FeedbackStore {
           await rm(temporary, { force: true }).catch(() => {});
         }
       } else this.images.set(`${sessionId}/${imageId}`, Buffer.from(bytes));
+      this.missing.delete(sessionId);
     });
   }
 
@@ -231,8 +332,9 @@ export class FeedbackStore {
     return result;
   }
 
-  private async commit(session: Session): Promise<void> {
+  private async commit(session: Session, preserveImages = false): Promise<void> {
     validateSession(session);
+    await this.checkpoint();
     const previous = this.sessions.get(session.document.id);
     const previousImages = new Map(
       previous?.document.annotations
@@ -251,19 +353,12 @@ export class FeedbackStore {
     if (isDeepStrictEqual(previous, session)) return;
     const next = new Map(this.sessions).set(session.document.id, session);
     if (this.filePath !== undefined) {
-      const parent = dirname(this.filePath);
-      await mkdir(parent, { recursive: true, mode: 0o700 });
-      const temporary = `${this.filePath}.${randomUUID()}.tmp`;
-      try {
-        await writeFile(temporary, JSON.stringify({ version: 1, sessions: [...next.values()] }), {
-          mode: 0o600,
-          flag: 'wx',
-        });
-        await rename(temporary, this.filePath);
-      } catch (error) {
-        await rm(temporary, { force: true }).catch(() => {});
-        throw error;
-      }
+      await writeSnapshot(
+        this.filePath,
+        { ...this.snapshot(), sessions: [...next.values()] },
+        this.snapshot(),
+      );
+      this.stamp = await this.fileStamp();
     }
     this.sessions = next;
     const retained = new Set(
@@ -274,7 +369,7 @@ export class FeedbackStore {
     for (const image of previous?.document.annotations.flatMap(
       (annotation) => annotation.images ?? [],
     ) ?? []) {
-      if (!retained.has(image.id)) {
+      if (!preserveImages && !retained.has(image.id)) {
         this.images.delete(`${session.document.id}/${image.id}`);
         if (this.filePath)
           await rm(this.imagePath(session.document.id, image.id), { force: true }).catch(() => {});
@@ -307,6 +402,38 @@ export class FeedbackStore {
       ) {
         throw new StoreError(409, 'Session is bound to another document');
       }
+      const revision =
+        previous && createHash('sha256').update(JSON.stringify(previous)).digest('hex');
+      const resolving = request.recovery && previous;
+      if (
+        resolving &&
+        (request.recovery!.epoch !== this.storageEpoch || request.recovery!.revision !== revision)
+      )
+        throw new StoreError(
+          409,
+          'Recovery version changed. Retry to review the current server snapshot.',
+          'recovery-stale',
+        );
+      if (
+        previous &&
+        request.storageEpoch &&
+        request.storageEpoch !== this.storageEpoch &&
+        (!isDeepStrictEqual(previous.document, request.document) ||
+          request.operations.length > 0) &&
+        !resolving
+      ) {
+        await this.preserveRecovery(request.document);
+        return SyncResponseSchema.parse({
+          document: previous.document,
+          acknowledged: [],
+          storageEpoch: this.storageEpoch,
+          recovery: { revision },
+        });
+      }
+      if (resolving) {
+        await this.preserveRecovery(previous.document);
+        await this.preserveRecovery(request.document);
+      }
       const session: Session = previous
         ? structuredClone(previous)
         : {
@@ -315,10 +442,16 @@ export class FeedbackStore {
             seen: [],
             tombstones: [],
           };
+      if (resolving && request.recovery!.source === 'browser') {
+        session.document = request.document;
+        session.tombstones = session.tombstones.filter(
+          (id) => !request.document.annotations.some((annotation) => annotation.id === id),
+        );
+      }
       validateSession(session);
       const seen = new Set(session.seen);
       const tombstones = new Set(session.tombstones);
-      for (const operation of request.operations) {
+      for (const operation of resolving ? [] : request.operations) {
         if (seen.has(operation.id)) continue;
         if (seen.size >= MAX_OPERATION_IDS) throw new StoreError(409, 'Operation capacity reached');
         const id = operation.kind === 'upsert' ? operation.annotation.id : operation.annotationId;
@@ -345,12 +478,21 @@ export class FeedbackStore {
         seen.add(operation.id);
       }
       session.seen = [...seen];
+      if (resolving) {
+        session.seen = [
+          ...new Set([...session.seen, ...request.operations.map((operation) => operation.id)]),
+        ];
+        if (session.seen.length > MAX_OPERATION_IDS)
+          throw new StoreError(409, 'Operation capacity reached');
+      }
       session.tombstones = [...tombstones];
+      await this.commit(session, !!resolving);
       const response = SyncResponseSchema.parse({
         document: session.document,
         acknowledged: request.operations.map((operation) => operation.id),
+        storageEpoch: this.storageEpoch,
+        missingImages: await this.missingImages(session.document),
       });
-      await this.commit(session);
       return response;
     });
   }
@@ -484,14 +626,18 @@ export async function createFeedbackStore(
   options: { filePath?: string } = {},
 ): Promise<FeedbackStore> {
   if (options.filePath === undefined) return new FeedbackStore();
-  let contents: string;
-  try {
-    contents = await readFile(options.filePath, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      return new FeedbackStore(options.filePath);
-    throw error;
-  }
-  const data = FileSchema.parse(JSON.parse(contents));
-  return new FeedbackStore(options.filePath, data.sessions);
+  const { value, recovered } = await readSnapshot(options.filePath, parseFeedbackFile);
+  const store = new FeedbackStore(
+    options.filePath,
+    value?.sessions,
+    recovered ? randomUUID() : value?.storageEpoch,
+  );
+  await store.repair(!value?.storageEpoch || recovered);
+  return store;
+}
+
+export function parseFeedbackFile(value: unknown) {
+  const file = FileSchema.parse(value);
+  file.sessions.forEach(validateSession);
+  return file;
 }

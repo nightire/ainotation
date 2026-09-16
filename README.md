@@ -84,6 +84,8 @@ Start the web app to register it, save some feedback, then ask your agent:
 
 The agent can discover projects, read feedback and images, and create, update or delete annotations. You can also use **Copy feedback** or **Export** to share feedback manually.
 
+For missing files, interrupted services or damaged storage, use `ainotation-mcp doctor` and `ainotation-mcp repair`. Settings also supports retrying connections and restoring saved project pages from the browser. See [Reliability and recovery](./RECOVERY.md) for conflict handling and external backups.
+
 ### Multiple apps in one workspace
 
 Give each app its own project name. To keep its identity when renaming it, provide a stable `id`:

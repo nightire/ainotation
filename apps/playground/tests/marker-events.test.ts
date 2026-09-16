@@ -15,6 +15,7 @@ it.each(['mouse', 'touch', 'keyboard'] as const)(
       if (!address || typeof address === 'string') throw new Error('Missing server address');
       browser = await chromium.launch({ channel: 'chrome', headless: true });
       const page = await browser.newPage({
+        locale: 'en-US',
         viewport: { width: 1280, height: 1000 },
         hasTouch: input === 'touch',
       });

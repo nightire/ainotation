@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, rename } from 'node:fs/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { createFeedbackStore, StoreError, type FeedbackStore } from './store';
@@ -12,13 +13,13 @@ import {
   ProjectError,
   type ProjectDeclaration,
 } from './project';
-import { writePrivateJson } from './atomic-json';
+import { readSnapshot, writeSnapshot, exists } from './recovery-json';
 import { isExactOrigin, tokenDigest } from './http-common';
 
 const RegisteredProjectSchema = ProjectConfigSchema.extend({
   root: z.string().min(1).refine(isAbsolute),
 }).strict();
-const RegistrySchema = z
+export const RegistrySchema = z
   .object({ version: z.literal(1), projects: z.array(RegisteredProjectSchema).max(100) })
   .strict();
 export type RegisteredProject = z.infer<typeof RegisteredProjectSchema>;
@@ -36,6 +37,16 @@ export type GrantRequest = z.infer<typeof GrantRequestSchema>;
 export type ProjectGrant = GrantRequest & { grantId: string; expiresAt: number };
 type GrantState = { grant: ProjectGrant; digest: string; controller: AbortController };
 export type IssuedGrant = ProjectGrant & { token: string };
+export function parseRegistry(value: unknown) {
+  const registry = RegistrySchema.parse(value);
+  if (
+    new Set(registry.projects.map((project) => project.projectId)).size !==
+      registry.projects.length ||
+    new Set(registry.projects.map((project) => project.root)).size !== registry.projects.length
+  )
+    throw new Error('Invalid project registry');
+  return registry;
+}
 export interface AuthorizedProject {
   grant: ProjectGrant;
   project: RegisteredProject;
@@ -52,12 +63,8 @@ export async function createProjectService(options: {
   if (!Number.isFinite(leaseMs) || leaseMs <= 0) throw new Error('Lease duration must be positive');
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const registryPath = join(directory, 'projects.json');
-  let stored: RegisteredProject[] = [];
-  try {
-    stored = RegistrySchema.parse(JSON.parse(await readFile(registryPath, 'utf8'))).projects;
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-  }
+  const loaded = await readSnapshot(registryPath, parseRegistry);
+  const stored: RegisteredProject[] = loaded.value?.projects ?? [];
   const projects = new Map<string, RegisteredProject>();
   for (const project of stored) {
     if (
@@ -138,7 +145,34 @@ export async function createProjectService(options: {
     return state;
   }
 
+  async function repairRegistry() {
+    const snapshot = { version: 1, projects: [...projects.values()] };
+    if (await exists(registryPath)) {
+      let disk;
+      try {
+        disk = parseRegistry(JSON.parse(await readFile(registryPath, 'utf8')));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code) throw error;
+        await rename(registryPath, `${registryPath}.corrupt-${randomUUID()}`);
+      }
+      if (disk && !isDeepStrictEqual(disk, snapshot))
+        throw new StoreError(
+          409,
+          'Project registry changed outside this service. Run ainotation-mcp doctor.',
+          'storage-conflict',
+        );
+      if (disk) return;
+    }
+    await writeSnapshot(registryPath, snapshot);
+  }
+
   return {
+    async repair() {
+      const work = queue.then(repairRegistry);
+      queue = work.catch(() => {});
+      await work;
+      await Promise.all([...stores.values()].map(async (store) => (await store).repair()));
+    },
     listGrants(): ProjectGrant[] {
       requireOpen();
       expire();
@@ -178,6 +212,7 @@ export async function createProjectService(options: {
       });
       const work = queue.then(async () => {
         requireOpen();
+        await repairRegistry();
         const existing = projects.get(project.projectId);
         if (existing && existing.root !== project.root)
           throw new StoreError(409, 'Project ID is already registered to a different root');
@@ -187,11 +222,16 @@ export async function createProjectService(options: {
           )
         )
           throw new StoreError(409, 'Project root is already registered with a different identity');
-        if (existing && existing.name === project.name) return structuredClone(existing);
+        if (existing && existing.name === project.name && (await exists(registryPath)))
+          return structuredClone(existing);
         if (!existing && projects.size >= 100)
           throw new StoreError(409, 'Project capacity reached');
         const next = new Map(projects).set(project.projectId, project);
-        await writePrivateJson(registryPath, { version: 1, projects: [...next.values()] });
+        await writeSnapshot(
+          registryPath,
+          { version: 1, projects: [...next.values()] },
+          { version: 1, projects: [...projects.values()] },
+        );
         projects.set(project.projectId, project);
         return structuredClone(project);
       });

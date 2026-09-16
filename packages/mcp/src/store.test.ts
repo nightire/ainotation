@@ -672,7 +672,7 @@ it('persists delete tombstones, rejects recreation and stale upserts, and scopes
   });
   const operation: FeedbackOperation = { id: randomUUID(), kind: 'upsert', annotation };
   const response = await reopened.sync(document.id, { document, operations: [operation] }, origin);
-  expect(response).toEqual({ document: deleted, acknowledged: [operation.id] });
+  expect(response).toMatchObject({ document: deleted, acknowledged: [operation.id] });
   expect(reloadedChanged).not.toHaveBeenCalled();
   expect((await reopened.createAnnotation(other.id, input)).annotations.at(-1)!.id).toBe(
     annotation.id,

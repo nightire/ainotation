@@ -1,10 +1,108 @@
 import { createFeedbackDocument } from '@ainotation/schema';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { createSyncClient, normalizeConnection } from './sync';
+import { syncImages } from './image-sync';
+import { canvasBlob, describeImage } from './images';
+import { capturePage } from './selection';
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+it.each(['conflict', 'storage-error'] as const)(
+  'pauses on %s without replacing local feedback or repeatedly retrying',
+  async (failure) => {
+    const document = createFeedbackDocument(location.href);
+    const recovery = {
+      document,
+      acknowledged: [],
+      storageEpoch: crypto.randomUUID(),
+      recovery: { revision: 'a'.repeat(64) },
+    };
+    const fetcher = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () =>
+        failure === 'conflict'
+          ? Response.json(recovery)
+          : Response.json({ code: 'storage-unavailable' }, { status: 500 }),
+      );
+    const apply = vi.fn(async () => {});
+    const onRecovery = vi.fn(async () => {});
+    const states = vi.fn();
+    const client = createSyncClient({
+      connection: { endpoint: 'http://127.0.0.1:4748', token: 'test-token' },
+      sessionId: document.id,
+      read: async () => ({
+        document,
+        operations: [],
+        draft: { text: '', editingId: null, targets: [] },
+        authority: null,
+        storageEpoch: crypto.randomUUID(),
+      }),
+      apply,
+      onState: states,
+      onSync() {},
+      onRecovery,
+    });
+    try {
+      await client.finished;
+      client.request();
+      await Promise.resolve();
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(apply).not.toHaveBeenCalled();
+      expect(onRecovery).toHaveBeenCalledTimes(failure === 'conflict' ? 1 : 0);
+      expect(states.mock.calls.at(-1)?.[0]).toBe('error');
+    } finally {
+      client.stop();
+    }
+  },
+);
+
+it('reuploads a missing server image even when it was already uploaded by this client', async () => {
+  const canvas = window.document.createElement('canvas');
+  canvas.width = canvas.height = 16;
+  const blob = await canvasBlob(canvas);
+  const image = await describeImage(blob, 'import');
+  const document = createFeedbackDocument(location.href);
+  document.annotations.push({
+    id: crypto.randomUUID(),
+    comment: 'Image',
+    createdAt: document.createdAt,
+    updatedAt: document.createdAt,
+    page: capturePage(),
+    targets: [
+      {
+        id: crypto.randomUUID(),
+        selector: 'body',
+        shadowHosts: [],
+        tagName: 'body',
+        text: '',
+        attributes: {},
+        styles: {},
+        rect: { x: 0, y: 0, width: 10, height: 10 },
+      },
+    ],
+    status: 'pending',
+    replies: [],
+    images: [image],
+  });
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockImplementation(async () => new Response(null, { status: 204 }));
+  const options = {
+    document,
+    local: { [image.id]: blob },
+    connection: { endpoint: 'http://127.0.0.1:4748', token: 'test-token' },
+    signal: new AbortController().signal,
+    uploaded: new Set<string>(),
+  };
+  await syncImages(options);
+  await syncImages(options);
+  expect(fetcher).toHaveBeenCalledOnce();
+  await syncImages({ ...options, missing: [image.id] });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls.every(([, init]) => init?.method === 'POST')).toBe(true);
 });
 
 it('allows only explicit loopback endpoints and header-safe pairing tokens', () => {

@@ -12,6 +12,8 @@ import {
 import { serviceRequest } from './service-client';
 import { ProjectError } from './project';
 import { StoreError } from './store';
+import { ownerPaths, probeOwner, canonicalServiceDirectory } from './service-owner';
+import { ServiceConnectionSchema } from './shared-service';
 
 const HealthSchema = z.object({ ok: z.literal(true), version: z.literal(1), instanceId: z.uuid() });
 
@@ -60,8 +62,39 @@ export async function ensureSharedService(
   let launchError: Error | undefined;
   while (Date.now() < deadline) {
     signal?.throwIfAborted();
+    const owner = await probeOwner(directory);
     const connection = await readServiceConnection(directory);
+    if (
+      connection &&
+      owner &&
+      (connection.instanceId !== owner.instanceId || connection.pid !== owner.pid)
+    )
+      throw new ProjectError(
+        'Cannot verify the shared service: coordinator ownership does not match connection.json.',
+      );
     if (connection && (await healthy(connection, signal))) return connection;
+    if (owner) {
+      try {
+        const remembered = ServiceConnectionSchema.parse(
+          JSON.parse(await readFile(ownerPaths(directory).record, 'utf8')),
+        );
+        if (remembered.instanceId !== owner.instanceId || remembered.pid !== owner.pid)
+          throw new ProjectError(
+            'Coordinator ownership does not match its private record. Run ainotation-mcp doctor.',
+          );
+        if (await healthy(remembered, signal)) {
+          await serviceRequest(remembered, '/control/repair', {
+            method: 'POST',
+            ...(signal ? { signal } : {}),
+          });
+          return remembered;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      await delay(50, undefined, signal ? { signal } : {});
+      continue;
+    }
     let locked = false;
     try {
       const lock = await readFile(join(directory, 'service.lock'), 'utf8');
@@ -110,7 +143,19 @@ export async function ensureSharedService(
 
 /** Explicit operator action; never used by automatic discovery or pairing. */
 export async function stopSharedService(directory = defaultServiceDirectory()): Promise<boolean> {
-  const connection = await readServiceConnection(directory);
+  directory = await canonicalServiceDirectory(directory);
+  let connection = await readServiceConnection(directory);
+  const owner = await probeOwner(directory);
+  if (
+    connection &&
+    owner &&
+    (connection.instanceId !== owner.instanceId || connection.pid !== owner.pid)
+  )
+    throw new ProjectError(
+      'Cannot stop a service with conflicting coordinator ownership. Run ainotation-mcp doctor.',
+    );
+  if (!connection && (await probeOwner(directory)))
+    connection = await ensureSharedService({ directory });
   if (!connection) return false;
   if (!(await healthy(connection)))
     throw new ProjectError(

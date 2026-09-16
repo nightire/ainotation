@@ -9,6 +9,8 @@ import {
   MarkerAnchorSchema,
   PageSnapshotSchema,
   FeedbackImagesSchema,
+  SyncRequestSchema,
+  SyncResponseSchema,
 } from '@ainotation/schema';
 import type {
   FeedbackDocument,
@@ -18,6 +20,7 @@ import type {
   MarkerAnchor,
   PageSnapshot,
   FeedbackImage,
+  SyncRequest,
 } from '@ainotation/schema';
 
 export interface DraftRecord {
@@ -34,6 +37,11 @@ export interface DraftRecord {
   };
   images?: Record<string, Blob>;
   authority: string | null;
+  storageEpoch?: string;
+  syncRecovery?: Pick<NonNullable<SyncRequest['recovery']>, 'epoch' | 'revision'> & {
+    server?: FeedbackDocument | undefined;
+  };
+  recoveryCopies?: { document: FeedbackDocument; images: Record<string, Blob> }[];
   multipleSelection?: boolean;
 }
 interface FeedbackDatabase extends DBSchema {
@@ -122,6 +130,32 @@ export async function createDraftStore(options: {
           ? { multipleSelection: value.multipleSelection }
           : {}),
         document,
+        ...(value.recoveryCopies
+          ? {
+              recoveryCopies: value.recoveryCopies.slice(-3).map((copy) => ({
+                document: FeedbackDocumentSchema.parse(copy.document),
+                images: Object.fromEntries(
+                  Object.entries(copy.images).filter(([, blob]) => blob instanceof Blob),
+                ),
+              })),
+            }
+          : {}),
+        ...(value.storageEpoch
+          ? {
+              storageEpoch: SyncResponseSchema.shape.storageEpoch
+                .unwrap()
+                .parse(value.storageEpoch),
+            }
+          : {}),
+        ...(value.syncRecovery
+          ? {
+              syncRecovery: SyncRequestSchema.shape.recovery
+                .unwrap()
+                .omit({ source: true })
+                .extend({ server: FeedbackDocumentSchema.optional() })
+                .parse(value.syncRecovery),
+            }
+          : {}),
         operations: FeedbackOperationSchema.array().max(1000).parse(value.operations),
         authority: typeof value.authority === 'string' ? value.authority : null,
         draft: {
@@ -274,14 +308,14 @@ export async function createDraftStore(options: {
       });
     },
     bindAuthority(key: string, url: string, authority: string) {
-      return update(key, url, (record) => ({
-        ...record,
-        authority,
-        document:
-          record.authority && record.authority !== authority
-            ? { ...record.document, id: crypto.randomUUID() }
-            : record.document,
-      }));
+      return update(key, url, (record) => {
+        if (record.authority && record.authority !== authority) {
+          delete record.storageEpoch;
+          delete record.syncRecovery;
+          record.document = { ...record.document, id: crypto.randomUUID() };
+        }
+        return { ...record, authority };
+      });
     },
     mutate(
       key: string,
@@ -312,8 +346,17 @@ export async function createDraftStore(options: {
     },
     applySync(key: string, url: string, response: SyncResponse, images: Record<string, Blob> = {}) {
       return update(key, url, (record) => {
+        if (response.recovery)
+          throw new Error('Recovery conflicts must be resolved before applying server data.');
         if (record.document.id !== response.document.id || response.document.url !== url)
           throw new Error('MCP session mismatch');
+        if (record.syncRecovery) {
+          record.recoveryCopies = [
+            ...(record.recoveryCopies ?? []),
+            { document: record.document, images: record.images ?? {} },
+          ].slice(-3);
+          delete record.syncRecovery;
+        }
         const acknowledged = new Set(response.acknowledged);
         const operations = record.operations.filter((operation) => !acknowledged.has(operation.id));
         const document = operations.reduce(applyFeedbackOperation, response.document);
@@ -358,6 +401,7 @@ export async function createDraftStore(options: {
         return {
           ...record,
           document,
+          ...(response.storageEpoch ? { storageEpoch: response.storageEpoch } : {}),
           images: { ...record.images, ...images },
           operations,
           draft,

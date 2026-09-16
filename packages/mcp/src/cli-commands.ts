@@ -16,6 +16,9 @@ Commands:
   server    Start the MCP/HTTP service
   service   Start the shared multi-project local service
   connect   Run workspace-scoped MCP with per-call project selection
+  doctor    Inspect local service/storage without changing data
+  repair    Repair missing files or restore validated backups
+  backup    Save a data-only snapshot outside the service directory
 
 Project options:
   --directory <path>   Start at this directory (default: current directory)
@@ -63,6 +66,43 @@ export async function runCli(
   if (command === 'service') {
     const { startSharedServiceCommand } = await import('./service-command');
     await startSharedServiceCommand(rest);
+    return;
+  }
+  if (command === 'doctor' || command === 'repair' || command === 'backup') {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        'data-dir': { type: 'string' },
+        json: { type: 'boolean' },
+        help: { type: 'boolean' },
+        'reset-damaged': { type: 'boolean' },
+        'restore-from': { type: 'string' },
+        to: { type: 'string' },
+        keep: { type: 'string', default: '3' },
+      },
+    });
+    if (values.help) {
+      context.output(
+        'Usage: ainotation-mcp doctor [--data-dir PATH] [--json]\n       ainotation-mcp repair [--data-dir PATH] [--reset-damaged | --restore-from SNAPSHOT] [--json]\n       ainotation-mcp backup --to DIRECTORY [--keep 3] [--data-dir PATH] [--json]\nBackup and restore require the service to be stopped. --reset-damaged explicitly starts unreadable stores empty after preserving damaged files.\n',
+      );
+      return;
+    }
+    const { defaultServiceDirectory } = await import('./shared-service');
+    const { diagnoseService, repairService } = await import('./diagnostics');
+    const directory = values['data-dir'] ?? defaultServiceDirectory();
+    let result;
+    if (command === 'doctor') result = await diagnoseService(directory);
+    else if (command === 'backup') {
+      if (!values.to) throw new ProjectError('backup requires --to DIRECTORY.');
+      const { backupService } = await import('./backup');
+      result = await backupService(directory, values.to, Number(values.keep));
+    } else if (values['restore-from']) {
+      if (values['reset-damaged'])
+        throw new ProjectError('Choose either --restore-from or --reset-damaged.');
+      const { restoreService } = await import('./backup');
+      result = await restoreService(directory, values['restore-from']);
+    } else result = await repairService(directory, values['reset-damaged'] ?? false);
+    context.output(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
   if (command === 'connect') {

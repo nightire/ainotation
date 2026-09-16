@@ -185,7 +185,10 @@ it('returns authoritative snapshots and binds sessions permanently to URL and or
   const { server, document, headers, sync, store } = await setup();
   const response = await sync();
   expect(response.status).toBe(200);
-  expect(SyncResponseSchema.parse(await response.json())).toEqual({ document, acknowledged: [] });
+  expect(SyncResponseSchema.parse(await response.json())).toMatchObject({
+    document,
+    acknowledged: [],
+  });
   await store.action(document.id, document.annotations[0]!.id, {
     kind: 'resolve',
     summary: 'Agent context',

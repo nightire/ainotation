@@ -2,7 +2,7 @@ import { LitElement, css, html, nothing, type PropertyValues } from 'lit';
 import { Copy, createElement, Download, Settings, Trash2, X, Sun, Moon } from 'lucide';
 import { themeStyles } from './theme';
 import { logoMark } from './logo';
-import { messages, locales, languageNames, isLocale } from '../i18n';
+import { messages, locales, languageNames, isLocale, formatMessage } from '../i18n';
 import {
   TRIGGER_SIZE,
   TOOLBAR_WIDTH,
@@ -161,8 +161,8 @@ export class InspectorShell extends LitElement {
       gap: 7px;
     }
     .settings-heading .brand-mark {
-      width: 20px;
-      height: 20px;
+      width: 16px;
+      height: 16px;
       color: var(--ain-brand-mark);
     }
     .icon {
@@ -217,6 +217,16 @@ export class InspectorShell extends LitElement {
       gap: 6px;
       font-size: 12px;
       color: var(--ain-muted);
+    }
+    .settings a {
+      color: var(--ain-text);
+      overflow-wrap: anywhere;
+    }
+    .recovery-preview {
+      max-height: 180px;
+      overflow: auto;
+      overflow-wrap: anywhere;
+      font-size: 12px;
     }
     .connection-status::before {
       content: '';
@@ -897,6 +907,68 @@ export class InspectorShell extends LitElement {
           view.localOnly
             ? html`<p class="muted local-mode-description">${m.localModeDescription}</p>`
             : html` <p>${m.connection}</p>
+                ${view.hasRecoveryCopy ? html`<button @click=${() => this.onaction({ type: 'export-recovery' })}>${m.exportRecovery}</button>` : nothing}
+                ${
+                  view.connection === 'error' ||
+                  view.recoveryNeeded ||
+                  view.recoveringProject ||
+                  view.recoveryPages.length > 0
+                    ? html`<button
+                        data-command="recover-project"
+                        ?disabled=${view.recoveringProject || view.connection === 'offline'}
+                        @click=${() => this.onaction({ type: 'recover-project' })}
+                      >
+                        ${m.recoverProject}
+                      </button>`
+                    : nothing
+                }
+                ${
+                  view.recoveryPages.length
+                    ? html`<p class="muted">${m.syncProjectReview}</p>
+                        <ul>
+                          ${view.recoveryPages.map((url) => html`<li><a href=${url}>${url}</a></li>`)}
+                        </ul>`
+                    : nothing
+                }
+                ${view.syncProblem ? html`<p class="muted" role="status">${formatMessage(view.locale, view.syncProblem)}</p>` : nothing}
+                ${
+                  view.recoveryNeeded
+                    ? html`<p class="muted">${m.recoveryHelp}</p>
+                        <details>
+                          <summary>
+                            ${m.recoveryLocalPreview(view.document?.annotations.length ?? 0)}
+                          </summary>
+                          <ul class="recovery-preview">
+                            ${view.document?.annotations.map((annotation) => html`<li>${annotation.comment}</li>`)}
+                          </ul>
+                        </details>
+                        ${
+                          view.recoveredDocument
+                            ? html`<details>
+                                <summary>
+                                  ${m.recoveryServerPreview(view.recoveredDocument.annotations.length)}
+                                </summary>
+                                <ul class="recovery-preview">
+                                  ${view.recoveredDocument.annotations.map((annotation) => html`<li>${annotation.comment}</li>`)}
+                                </ul>
+                              </details>`
+                            : nothing
+                        }
+                        <div class="row">
+                          <button @click=${() => this.onaction({ type: 'copy' })}>${m.copy}</button
+                          ><button
+                            @click=${() => this.onaction({ type: 'resolve-recovery', source: 'browser' })}
+                          >
+                            ${m.recoveryBrowser}</button
+                          ><button
+                            @click=${() => this.onaction({ type: 'resolve-recovery', source: 'server' })}
+                          >
+                            ${m.recoveryServer}
+                          </button>
+                        </div>`
+                    : nothing
+                }
+                ${view.connection === 'error' ? html`<button @click=${() => this.onaction({ type: 'retry-sync' })}>${m.retrySync}</button>` : nothing}
                 ${
                   view.managedConnection
                     ? html`<p class="muted">${view.projectName}</p>
