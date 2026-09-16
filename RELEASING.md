@@ -66,6 +66,10 @@ uses `id-token: write` and GitHub-hosted runners; no npm write token is stored i
 GitHub. npm automatically creates provenance for these public OIDC publishes.
 The initial local bootstrap publish does not have a GitHub provenance attestation.
 
+The workflow invokes `vp run --no-cache release`. Publishing must never replay a
+cached result; disabling the task cache also preserves the GitHub OIDC request
+environment and `CHANGESETS_OUTPUT` used to create tags and GitHub releases.
+
 Enable “Allow GitHub Actions to create and approve pull requests” in repository
 Actions settings so Changesets can create version PRs. The action's default token
 is used; release jobs have scoped permissions. Actions are pinned to reviewed

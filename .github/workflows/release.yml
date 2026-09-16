@@ -97,6 +97,8 @@ jobs:
       - run: vp run build:packages
       - uses: changesets/action/publish@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          script: vp run release
+          # Publishing needs live OIDC credentials and the Changesets output path.
+          # Cached Vite tasks filter these environment variables.
+          script: vp run --no-cache release
           create-github-releases: true
           push-git-tags: true
