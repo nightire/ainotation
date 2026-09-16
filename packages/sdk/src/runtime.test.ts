@@ -161,8 +161,11 @@ describe('mounted feedback runtime', () => {
       .querySelector('[data-ainotation-ui="drawing"]')!
       .shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Attach image"]')!
       .click();
-    await vi.waitFor(() =>
-      expect(document.querySelector('[data-ainotation-ui="drawing"]')).toBeNull(),
+    // Image composition and IndexedDB persistence can exceed the default one-second
+    // poll on hosted browser runners. Still require the editor to finish and close.
+    await vi.waitFor(
+      () => expect(document.querySelector('[data-ainotation-ui="drawing"]')).toBeNull(),
+      { timeout: 5000 },
     );
     const images = structuredClone(shell.view.images);
     expect(images).toHaveLength(1);
