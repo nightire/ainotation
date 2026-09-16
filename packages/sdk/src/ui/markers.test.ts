@@ -132,6 +132,34 @@ function fixture(tag = 'div') {
 }
 
 describe('in-place annotation markers', () => {
+  it('shows a compact locator with separate target context and full shadow details', () => {
+    const selected = {
+      ...target,
+      label: 'img.logo-dark',
+      tagName: 'img',
+      selector: '.site-header .logo-dark',
+      shadowHosts: ['#app-shell'],
+      ancestors: [
+        { tagName: 'header', attributes: { class: 'site-header' } },
+        { tagName: 'a', attributes: { 'aria-label': 'Ainotation home' } },
+      ],
+    };
+    const { root, control, onAction } = mount({
+      selected: [selected],
+      editorOpen: true,
+      marker: annotation.marker!,
+    });
+    expect(root.querySelector('.target-description')!.textContent?.trim()).toBe(
+      'header.site-header › a "Ainotation home" › img.logo-dark',
+    );
+    expect(root.querySelector('.target-locator code')!.textContent).toBe(selected.selector);
+    expect(root.querySelector('.target-details')!.textContent).toContain(
+      'Shadow hosts:\n#app-shell\nSelector:\n.site-header .logo-dark',
+    );
+    control('[data-action="copy-selector"]').click();
+    expect(onAction).toHaveBeenCalledExactlyOnceWith({ type: 'copy-selector', id: selected.id });
+    expect((root.querySelector('.target-details') as HTMLDetailsElement).open).toBe(false);
+  });
   it('updates marker, editor and quote colors without replacing the draft or moving the caret', () => {
     const quoted = {
       ...target,
@@ -371,11 +399,11 @@ describe('in-place annotation markers', () => {
       selected: [target, other],
     });
     expect(
-      [...root.querySelectorAll('.target-list li')].map((item) => item.textContent?.trim()),
+      [...root.querySelectorAll('.target-locator code')].map((item) => item.textContent?.trim()),
     ).toEqual([target.selector, other.selector]);
     expect(root.querySelector('script')).toBeNull();
     layer.update({ ...view, editingId: annotation.id, selected: [other] }, true);
-    expect(control('.target-list').textContent?.trim()).toBe(target.selector);
+    expect(control('.target-locator code').textContent?.trim()).toBe(target.selector);
     expect(root.querySelector('.popover h2, .popover label')).toBeNull();
   });
 

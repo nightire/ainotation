@@ -113,6 +113,34 @@
             >No changes saved yet.</output
           >
         </section>
+        <section class="sample" aria-labelledby="parent-target-heading">
+          <h2 id="parent-target-heading">Parent target: image border</h2>
+          <p class="sample-description">
+            Try asking to change the gold border to forest green. Clicking the picture selects the
+            image; use “Select parent element” in the annotation popover to target its border
+            container.
+          </p>
+          <figure class="border-example">
+            <span
+              id="sample-image-frame"
+              class="border-example-frame"
+              data-element="Image border container"
+            >
+              <img
+                id="sample-framed-image"
+                class="border-example-image"
+                src="/src/assets/border-example.svg"
+                width="360"
+                height="240"
+                alt="Mountains reflected in a quiet lake"
+              />
+            </span>
+            <figcaption class="sample-description">
+              <code>img#sample-framed-image</code> → <code>span#sample-image-frame</code><br />
+              Same bounding box. The visible border belongs to the outer span.
+            </figcaption>
+          </figure>
+        </section>
       </div>
     </main>
     <div id="sample-modal-overlay" class="modal-overlay" hidden>

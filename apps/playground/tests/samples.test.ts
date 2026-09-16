@@ -1,4 +1,5 @@
 import { createPlaygroundServer, configurePage } from './helpers';
+import { resolve } from 'node:path';
 import { expect, it } from 'vite-plus/test';
 import { chromium } from 'playwright';
 import type { InspectorShell } from '@ainotation/sdk/ui';
@@ -127,7 +128,47 @@ it('supports nested menus and a modal with native interaction and Inspector anno
     expect(await dialog.isVisible()).toBe(false);
     await shell.getByRole('button', { name: 'Close inspector', exact: true }).click();
 
+    const image = page.locator('#sample-framed-image');
+    const frame = page.locator('#sample-image-frame');
+    await image.scrollIntoViewIfNeeded();
+    expect(await image.evaluate((element) => (element as HTMLImageElement).naturalWidth)).toBe(720);
+    expect(await image.boundingBox()).toEqual(await frame.boundingBox());
+    expect(await frame.evaluate((element) => getComputedStyle(element).borderTopColor)).toBe(
+      'rgb(250, 174, 43)',
+    );
+    expect(
+      await image.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === element;
+      }),
+    ).toBe(true);
+    await shell.getByRole('button', { name: 'Open inspector', exact: true }).click();
+    await image.click();
+    expect(
+      await shell.evaluate(
+        (element) => (element as InspectorShell).view.selected[0]!.attributes.id,
+      ),
+    ).toBe('sample-framed-image');
+    await editor
+      .getByRole('textbox', { name: 'Feedback content', exact: true })
+      .fill('Change the gold border to forest green.');
+    await editor.getByRole('button', { name: 'Select parent element', exact: true }).click();
+    expect(
+      await shell.evaluate(
+        (element) => (element as InspectorShell).view.selected[0]!.attributes.id,
+      ),
+    ).toBe('sample-image-frame');
+    expect(
+      await editor.getByRole('textbox', { name: 'Feedback content', exact: true }).inputValue(),
+    ).toBe('Change the gold border to forest green.');
+    await page.screenshot({
+      path: resolve(import.meta.dirname, '../../../output/playwright/parent-target-example.png'),
+    });
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await shell.getByRole('button', { name: 'Close inspector', exact: true }).click();
+
     await page.setViewportSize({ width: 390, height: 844 });
+    expect(await image.boundingBox()).toEqual(await frame.boundingBox());
     await menuTrigger.click();
     await menu.getByRole('menuitem', { name: 'Export as', exact: true }).click();
     const child = await submenu.boundingBox();

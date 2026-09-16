@@ -112,6 +112,16 @@ it.each(['mouse', 'touch', 'keyboard'] as const)(
       expect(await shell.evaluate((el) => (el as InspectorShell).view.selected)).toEqual(
         saved.targets,
       );
+      await click(editor.getByRole('button', { name: 'Select parent element', exact: true }));
+      expect(await submenu.isVisible()).toBe(true);
+      expect(await shell.evaluate((el) => (el as InspectorShell).view.selected[0]!.tagName)).toBe(
+        'div',
+      );
+      await click(editor.getByRole('button', { name: 'Return to previous element', exact: true }));
+      expect(await shell.evaluate((el) => (el as InspectorShell).view.selected[0]!.id)).toBe(
+        saved.targets[0]!.id,
+      );
+      expect(await submenu.isVisible()).toBe(true);
       await click(text);
       await text.press('ControlOrMeta+A');
       await page.keyboard.type('Revised export menu note');

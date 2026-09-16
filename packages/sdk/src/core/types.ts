@@ -41,6 +41,8 @@ export interface InspectorPosition {
 export interface InspectorViewState {
   document: FeedbackDocument | null;
   selected: TargetSnapshot[];
+  targetNavigation: Record<string, { parent: boolean; back: boolean }>;
+  targetsAdjusted: boolean;
   availability: Record<string, TargetAvailability>;
   picking: boolean;
   passthrough: boolean;
@@ -82,6 +84,8 @@ export type InspectorAction =
   | { type: 'draft'; value: string }
   | { type: 'edit' | 'delete'; id: string }
   | { type: 'connect'; endpoint: string; token: string }
+  | { type: 'copy-selector'; id: string }
+  | { type: 'navigate-target'; id: string; direction: 'parent' | 'back' }
   | { type: 'retry-sync' }
   | { type: 'recover-project' | 'export-recovery' }
   | { type: 'resolve-recovery'; source: 'browser' | 'server' }
@@ -93,6 +97,8 @@ export function emptyViewState(): InspectorViewState {
   return {
     document: null,
     selected: [],
+    targetNavigation: {},
+    targetsAdjusted: false,
     availability: {},
     picking: false,
     passthrough: false,

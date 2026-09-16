@@ -137,6 +137,74 @@ afterEach(async () => {
 });
 
 describe('mounted feedback runtime', () => {
+  it('retargets drafts without losing text, persists explicit saved-target edits and cancels without changing the saved target', async () => {
+    const { instance, shell, buttons, fixture, read } = await setup();
+    select(buttons[0]!);
+    const original = shell.view.selected[0]!;
+    action(shell, { type: 'draft', value: 'Keep my comment' });
+    await vi.waitFor(async () => expect((await read())?.draft.text).toBe('Keep my comment'));
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 16;
+    const png = await new Promise<Blob>((resolve) => canvas.toBlob((blob) => resolve(blob!)));
+    action(shell, {
+      type: 'import-image',
+      file: new File([png], 'target.png', { type: 'image/png' }),
+    });
+    await vi.waitFor(() =>
+      expect(
+        document
+          .querySelector('[data-ainotation-ui="drawing"]')
+          ?.shadowRoot?.querySelector('[aria-label="Attach image"]'),
+      ).toBeTruthy(),
+    );
+    document
+      .querySelector('[data-ainotation-ui="drawing"]')!
+      .shadowRoot!.querySelector<HTMLButtonElement>('[aria-label="Attach image"]')!
+      .click();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-ainotation-ui="drawing"]')).toBeNull(),
+    );
+    const images = structuredClone(shell.view.images);
+    expect(images).toHaveLength(1);
+    const anchor = structuredClone(shell.view.marker);
+    action(shell, { type: 'navigate-target', id: original.id, direction: 'parent' });
+    await vi.waitFor(async () =>
+      expect((await read())?.draft.targets[0]!.attributes.id).toBe(fixture.id),
+    );
+    expect(shell.view.draft).toBe('Keep my comment');
+    expect(shell.view.images).toEqual(images);
+    expect(shell.view.marker!.x).toBeCloseTo(anchor!.x, 8);
+    expect(shell.view.marker!.y).toBeCloseTo(anchor!.y, 8);
+    const parent = shell.view.selected[0]!;
+    action(shell, { type: 'navigate-target', id: parent.id, direction: 'back' });
+    await vi.waitFor(() => expect(shell.view.selected[0]!.id).toBe(original.id));
+    await save(shell, 'Original button note');
+    const saved = instance.getDocument()!.annotations[0]!;
+    action(shell, { type: 'edit', id: saved.id });
+    action(shell, { type: 'navigate-target', id: saved.targets[0]!.id, direction: 'parent' });
+    await vi.waitFor(async () => expect((await read())?.draft.targetsAdjusted).toBe(true));
+    expect(instance.getDocument()!.annotations[0]).toEqual(saved);
+    action(shell, { type: 'cancel-edit' });
+    await vi.waitFor(() => expect(shell.view.editorOpen).toBe(false));
+    expect(instance.getDocument()!.annotations[0]).toEqual(saved);
+    action(shell, { type: 'edit', id: saved.id });
+    action(shell, { type: 'navigate-target', id: saved.targets[0]!.id, direction: 'parent' });
+    await vi.waitFor(async () => expect((await read())?.draft.targetsAdjusted).toBe(true));
+    instance.destroy();
+    await instance.mount();
+    const restored = document.querySelector('ainotation-inspector-shell')!;
+    restored.shadowRoot!.querySelector<HTMLButtonElement>('.launcher')!.click();
+    await vi.waitFor(() => expect(restored.view.picking).toBe(true));
+    expect(restored.view.targetsAdjusted).toBe(true);
+    expect(restored.view.draft).toBe(saved.comment);
+    await save(restored, saved.comment);
+    const updated = instance.getDocument()!.annotations[0]!;
+    expect(updated.id).toBe(saved.id);
+    expect(updated.targets[0]!.attributes.id).toBe(fixture.id);
+    expect(updated.images).toEqual(images);
+    expect(instance.getDocument()!.annotations).toHaveLength(1);
+  });
+
   it('recovers saved project pages without navigating to each page', async () => {
     const { shell, buttons, read, projectId, pageKeys } = await setup();
     select(buttons[0]!);

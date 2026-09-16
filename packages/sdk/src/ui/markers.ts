@@ -1,7 +1,20 @@
 import type { Annotation, MarkerAnchor, TargetSnapshot } from '@ainotation/schema';
 import { css, html, nothing, render } from 'lit';
 import { repeat } from 'lit/directives/repeat.js';
-import { Camera, ImagePlus, Download, Check, createElement, Pencil, Plus, Trash2, X } from 'lucide';
+import {
+  Camera,
+  ImagePlus,
+  Download,
+  Check,
+  Copy,
+  createElement,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+  ArrowUp,
+  ArrowDown,
+} from 'lucide';
 
 import type { InspectorAction, InspectorViewState } from '../core/types';
 import { themeStyles } from './theme';
@@ -9,6 +22,7 @@ import { toolNode } from '../core/dom';
 import { getViewport } from './position';
 import { messages } from '../i18n';
 import { bindMarkerEvents } from './marker-input';
+import { targetDescription, targetLocatorText } from './target-description';
 
 type Rect = TargetSnapshot['rect'];
 type Options = {
@@ -125,7 +139,7 @@ const styles = css`
     list-style: none;
     padding: 0;
     margin: 0 0 8px;
-    max-height: 100px;
+    max-height: 160px;
     overflow: auto;
     font:
       11px/1.5 ui-monospace,
@@ -135,6 +149,79 @@ const styles = css`
   .target-list li {
     overflow-wrap: anywhere;
     padding: 2px 0;
+  }
+  .target-description {
+    color: var(--ain-text);
+    font:
+      500 12px/1.5 system-ui,
+      sans-serif;
+  }
+  .target-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .target-heading .target-description {
+    flex: 1;
+    min-width: 0;
+  }
+  .target-tools {
+    display: flex;
+    flex-shrink: 0;
+  }
+  .target-tools button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 4px;
+    border: 0;
+    background: transparent;
+  }
+  .target-tools svg {
+    width: 14px;
+    height: 14px;
+  }
+  .target-locator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .target-locator code {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .copy-selector {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 4px;
+    border: 0;
+    background: transparent;
+  }
+  .copy-selector svg {
+    width: 14px;
+    height: 14px;
+  }
+  .target-details summary {
+    cursor: pointer;
+    font:
+      11px/1.5 system-ui,
+      sans-serif;
+  }
+  .target-details pre {
+    margin: 6px 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: inherit;
   }
   .text-quote {
     display: block;
@@ -394,7 +481,9 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     const positions = new Map(
       annotations.map((annotation) => [
         annotation.id,
-        point(annotation.marker, annotation.targets, annotation),
+        view!.editingId === annotation.id && view!.targetsAdjusted
+          ? point(view!.marker ?? undefined, view!.selected)
+          : point(annotation.marker, annotation.targets, annotation),
       ]),
     );
     for (const button of shadow.querySelectorAll<HTMLButtonElement>('.marker')) {
@@ -471,6 +560,18 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     }
     const type = button.dataset.action;
     switch (type) {
+      case 'target-parent':
+      case 'target-back':
+        if (button.dataset.targetId)
+          onAction({
+            type: 'navigate-target',
+            id: button.dataset.targetId,
+            direction: type === 'target-parent' ? 'parent' : 'back',
+          });
+        break;
+      case 'copy-selector':
+        if (button.dataset.targetId) onAction({ type, id: button.dataset.targetId });
+        break;
       case 'choose-image':
         shadow.querySelector<HTMLInputElement>('input[type=file]')?.click();
         break;
@@ -558,6 +659,13 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       const focused = shadow.activeElement as HTMLElement | null;
       const hadEditorFocus = Boolean(focused?.closest('.popover'));
       const focusedId = focused?.dataset.annotationId;
+      const navigationAction =
+        focused?.dataset.action === 'target-parent' || focused?.dataset.action === 'target-back'
+          ? focused.dataset.action
+          : undefined;
+      const navigationIndex = navigationAction
+        ? focused?.closest<HTMLElement>('[data-target-index]')?.dataset.targetIndex
+        : undefined;
       const previousEditorId = editorId;
       view = next;
       // Hiding for image editing must not leak its focusout to host dismissal handlers.
@@ -565,13 +673,17 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       visible = nextVisible;
       host.style.setProperty('display', visible ? 'block' : 'none', 'important');
       const annotations = next.document?.annotations ?? [];
-      const editorTargets = next.editingId
-        ? (annotations.find((annotation) => annotation.id === next.editingId)?.targets ??
-          next.selected)
-        : next.selected;
+      const editorTargets =
+        next.editingId && !next.targetsAdjusted
+          ? (annotations.find((annotation) => annotation.id === next.editingId)?.targets ??
+            next.selected)
+          : next.selected;
       const open = next.editorOpen && Boolean(next.editingId || next.marker);
       const key = open
-        ? JSON.stringify(next.editingId ?? [next.selected.map((target) => target.id), next.marker])
+        ? (next.editingId ??
+          (next.targetsAdjusted && editorKey
+            ? editorKey
+            : JSON.stringify([next.selected.map((target) => target.id), next.marker])))
         : null;
       const focusEditor = visible && key !== null && key !== editorKey;
       const closedEditor = editorKey !== null && key === null;
@@ -621,9 +733,36 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         ${repeat(
                           editorTargets,
                           (target) => target.id,
-                          (target) =>
-                            html`<li title=${target.text}>
-                              ${target.selector}${target.textSelection ? html`<q class="text-quote" aria-label=${m.selectedText}>${target.textSelection.exact}${target.textSelection.truncated ? '…' : ''}</q>` : nothing}
+                          (target, index) =>
+                            html`<li data-target-index=${index}>
+                              <div class="target-heading">
+                                <div class="target-description" title=${target.text}>
+                                  ${targetDescription(target)}
+                                </div>
+                                <div class="target-tools">
+                                  ${next.targetNavigation[target.id]?.back ? html`<button type="button" data-action="target-back" data-target-id=${target.id} aria-label=${m.previousTarget} title=${m.previousTarget} ?disabled=${next.saving}>${createElement(ArrowDown, { 'aria-hidden': 'true', focusable: 'false' })}</button>` : nothing}
+                                  ${next.targetNavigation[target.id]?.parent ? html`<button type="button" data-action="target-parent" data-target-id=${target.id} aria-label=${m.parentTarget} title=${m.parentTarget} ?disabled=${next.saving}>${createElement(ArrowUp, { 'aria-hidden': 'true', focusable: 'false' })}</button>` : nothing}
+                                </div>
+                              </div>
+                              <div class="target-locator">
+                                <code title=${target.selector}>${target.selector}</code
+                                ><button
+                                  class="copy-selector"
+                                  type="button"
+                                  data-action="copy-selector"
+                                  data-target-id=${target.id}
+                                  aria-label=${m.copySelector}
+                                  title=${m.copySelector}
+                                >
+                                  ${createElement(Copy, { 'aria-hidden': 'true', focusable: 'false' })}
+                                </button>
+                              </div>
+                              <details class="target-details">
+                                <summary>${m.locatorDetails}</summary>
+                                <pre>${targetLocatorText(target)}</pre>
+                                ${target.ancestors?.length ? html`<pre>${target.ancestors.map((node) => `${node.tagName}${node.attributes.id ? `#${node.attributes.id}` : ''}${node.shadowHost ? ' [shadow host]' : ''}`).join(' > ')} > ${target.tagName}</pre>` : nothing}
+                              </details>
+                              ${target.textSelection ? html`<q class="text-quote" aria-label=${m.selectedText}>${target.textSelection.exact}${target.textSelection.truncated ? '…' : ''}</q>` : nothing}
                             </li>`,
                         )}
                       </ul>
@@ -741,7 +880,13 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       if (visible) {
         position();
         schedule();
-        if (focusEditor) {
+        if (open && navigationIndex !== undefined && !focusEditor) {
+          const row = shadow.querySelector(`[data-target-index="${navigationIndex}"]`);
+          const button =
+            row?.querySelector<HTMLButtonElement>(`[data-action="${navigationAction}"]`) ??
+            row?.querySelector<HTMLButtonElement>('.target-tools button, .copy-selector');
+          button?.focus({ preventScroll: true });
+        } else if (focusEditor) {
           const textarea = shadow.querySelector('textarea');
           textarea?.focus({ preventScroll: true });
           textarea?.setSelectionRange(next.draft.length, next.draft.length);

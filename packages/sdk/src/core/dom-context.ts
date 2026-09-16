@@ -1,5 +1,6 @@
 import type { TargetSnapshot } from '@ainotation/schema';
 import { parentElement as parent, closestAcrossShadow } from './dom';
+import { descriptiveToken } from './selector';
 
 const attributeNames = [
   'id',
@@ -30,8 +31,12 @@ const attributeNames = [
 ];
 
 export function captureAttributes(element: Element): Record<string, string> {
+  // Keep a useful image identity without capturing embedded data or signed/query URLs.
+  const src = element.localName === 'img' ? element.getAttribute('src') : null;
+  const imageSource =
+    src && src.length <= 1000 && !/[?#]/.test(src) && !/^(?:data|blob):/i.test(src) ? ['src'] : [];
   return Object.fromEntries(
-    attributeNames.flatMap((name) => {
+    [...attributeNames, ...imageSource].flatMap((name) => {
       const value = element.getAttribute(name);
       return value === null ? [] : [[name, value.slice(0, 1000)]];
     }),
@@ -119,10 +124,15 @@ export function captureDomContext(
       'a[href], area[href], button, input, select, textarea, summary, iframe, [tabindex], [contenteditable=""], [contenteditable="true"]',
     );
   return {
-    label: `${element.localName}${description ? ` ${JSON.stringify(description)}` : ''}`.slice(
-      0,
-      160,
-    ),
+    label: `${element.localName}${
+      description
+        ? ` ${JSON.stringify(description)}`
+        : Array.from(element.classList)
+            .filter(descriptiveToken)
+            .slice(0, 2)
+            .map((name) => `.${name}`)
+            .join('')
+    }`.slice(0, 160),
     ancestors,
     ancestryTruncated: !!node,
     nearbyText: {

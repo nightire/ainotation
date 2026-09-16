@@ -15,6 +15,27 @@ Lit is provided by the SDK; hosts do not need to configure a rendering framework
 Feedback is saved locally. Screenshots require browser authorization; existing
 PNG/JPEG/WebP images can also be pasted, dropped or selected.
 
+Captured targets use uniquely verified CSS selectors: descriptive IDs, test IDs,
+attributes and classes, followed by ancestor scopes and positional fallbacks.
+Search is bounded to 256 candidate queries plus a final exact-path validation.
+The feedback editor shows captured target context, a copyable selector and
+expandable locator details. Shadow host selectors remain separate from the
+selector inside their root. Existing saved selectors remain compatible.
+
+Small per-target arrows in the editor select a parent or return along the path
+just traversed. They preserve draft text and attachments, keep the marker anchor
+in place, and work independently for multiple targets. Editing a saved annotation
+only replaces its targets on Save; Cancel leaves the original annotation intact.
+Adjusted draft targets survive remounting, while the temporary back-navigation
+history lasts only for the current editing session.
+
+Restoration still checks target identity; a unique match is not proof of identity
+after arbitrary page changes. New image snapshots also check captured `alt` and
+safe literal `src` attributes. Signed/query URLs and data/blob sources are omitted
+from the added source capture. These checks supplement the original element
+reference and existing tag/text/attribute checks; ambiguous targets are not
+silently rebound.
+
 For an explicitly local-only instance:
 
 ```ts

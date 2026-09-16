@@ -539,6 +539,78 @@ describe('selection in a real browser', () => {
     expect(selection.getTargets()[0]!.id).toBe(target.id);
   });
 
+  it('navigates each target independently and returns along the original child path', async () => {
+    const { selection, fixture } = await setup();
+    fixture.innerHTML =
+      '<span class="wrapper"><img class="logo-light"><img class="logo-dark"></span><button>Other</button>';
+    const image = fixture.querySelector('.logo-dark')!;
+    const wrapper = image.parentElement!;
+    const other = fixture.querySelector('button')!;
+    selection.select(image);
+    selection.select(other, true);
+    const [original, untouched] = selection.getTargets();
+    expect(selection.navigateTarget(original!.id, 'parent')).toBe(true);
+    let [parent, second] = selection.getTargets();
+    expect(parent!.tagName).toBe('span');
+    expect(second!.id).toBe(untouched!.id);
+    expect(selection.targetNavigation(parent!.id).back).toBe(true);
+    expect(selection.navigateTarget(parent!.id, 'back')).toBe(true);
+    expect(selection.getTargets()[0]!.id).toBe(original!.id);
+    selection.navigateTarget(original!.id, 'parent');
+    [parent] = selection.getTargets();
+    image.remove();
+    wrapper.append(image.cloneNode(true));
+    expect(selection.targetNavigation(parent!.id).back).toBe(false);
+    expect(selection.navigateTarget(parent!.id, 'back')).toBe(false);
+  });
+
+  it('crosses an open shadow boundary and avoids duplicate selected ancestors', async () => {
+    const { selection, fixture } = await setup();
+    const host = document.createElement('div');
+    host.id = 'navigation-shadow-host';
+    fixture.append(host);
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<button>Inside</button>';
+    selection.select(shadow.firstElementChild!);
+    const child = selection.getTargets()[0]!;
+    selection.navigateTarget(child.id, 'parent');
+    const parent = selection.getTargets()[0]!;
+    expect(parent.shadowHosts).toEqual([]);
+    expect(parent.selector).toBe('#navigation-shadow-host');
+    selection.navigateTarget(parent.id, 'back');
+    expect(selection.getTargets()[0]!.shadowHosts).toEqual(child.shadowHosts);
+    selection.select(host, true);
+    expect(selection.targetNavigation(child.id).parent).toBe(false);
+  });
+
+  it('rejects changed image identity on restoration and still reads legacy snapshots', async () => {
+    const { selection, fixture, createSelection } = await setup();
+    fixture.innerHTML = '<img class="identity-logo" src="/logo.svg" alt="Brand">';
+    const image = fixture.firstElementChild!;
+    selection.select(image);
+    const target = selection.getTargets()[0]!;
+    expect(target.selector).not.toContain('nth-of-type');
+    expect(target.attributes.src).toBe('/logo.svg');
+    image.setAttribute('src', '/other-logo.svg');
+    const restored = createSelection({ onChange: vi.fn() });
+    selections.push(restored);
+    expect(restored.availability(target)).toBe('missing');
+    image.setAttribute('src', '/logo.svg');
+    image.setAttribute('alt', 'Other brand');
+    expect(restored.availability(target)).toBe('missing');
+    image.setAttribute('alt', 'Brand');
+    expect(restored.availability(target)).toBe('available');
+    const legacy = structuredClone(target);
+    legacy.id = crypto.randomUUID();
+    delete legacy.attributes.src;
+    expect(restored.availability(legacy)).toBe('available');
+    image.setAttribute('src', '/logo.svg?token=private');
+    const signed = image.cloneNode(true) as Element;
+    fixture.append(signed);
+    selection.select(signed);
+    expect(selection.getTargets()[0]!.attributes.src).toBeUndefined();
+  });
+
   it('omits input secrets, hidden text, arbitrary attributes and tool text from snapshots', async () => {
     const { selection, fixture } = await setup();
     fixture.setAttribute('data-secret', 'private');

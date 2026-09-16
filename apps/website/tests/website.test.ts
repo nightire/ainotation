@@ -155,10 +155,53 @@ it('serves the Pages build, switches appearance and language, and runs a local S
       path: resolve(root, '../../output/playwright/website-local-only-settings.png'),
     });
     await shell.getByRole('button', { name: 'Settings', exact: true }).click();
-    await page.locator('#hero-title').click({ position: { x: 25, y: 20 } });
+    await page.locator('.site-header .logo-light').click();
+    const targetUi = page.locator('[data-ainotation-ui="markers"]');
+    await targetUi.locator('.target-locator code').waitFor();
+    expect(await targetUi.locator('.target-locator code').textContent()).toBe(
+      '.site-header .logo-light',
+    );
+    expect(await targetUi.locator('.target-description').textContent()).toContain('img.logo-light');
+    await targetUi.getByRole('button', { name: 'Copy selector', exact: true }).click();
+    await expect
+      .poll(() => page.locator('html').getAttribute('data-copied'))
+      .toBe('.site-header .logo-light');
+    await targetUi.locator('summary').click();
+    expect(
+      await targetUi.locator('details').evaluate((element) => (element as HTMLDetailsElement).open),
+    ).toBe(true);
+    await targetUi.locator('summary').click();
+    await targetUi
+      .locator('.popover')
+      .screenshot({ path: resolve(root, '../../output/playwright/website-concise-selector.png') });
     const feedback = page
       .locator('[data-ainotation-ui="markers"]')
       .getByRole('textbox', { name: 'Feedback content', exact: true });
+    await feedback.fill('Target the wrapper, not the image');
+    const before = await targetUi.locator('.popover').boundingBox();
+    await targetUi.getByRole('button', { name: 'Select parent element', exact: true }).click();
+    expect(await targetUi.locator('.target-description').textContent()).toContain(
+      'span.brand-mark',
+    );
+    expect(await feedback.inputValue()).toBe('Target the wrapper, not the image');
+    const after = await targetUi.locator('.popover').boundingBox();
+    expect(after!.x).toBeCloseTo(before!.x, 0);
+    expect(after!.y).toBeCloseTo(before!.y, 0);
+    await targetUi
+      .locator('.popover')
+      .screenshot({ path: resolve(root, '../../output/playwright/website-parent-target.png') });
+    await targetUi.getByRole('button', { name: 'Return to previous element', exact: true }).click();
+    expect(await targetUi.locator('.target-description').textContent()).toContain('img.logo-light');
+    await targetUi.getByRole('button', { name: 'Select parent element', exact: true }).focus();
+    await page.keyboard.press('Enter');
+    expect(await targetUi.locator('.target-description').textContent()).toContain(
+      'span.brand-mark',
+    );
+    expect(
+      await targetUi
+        .getByRole('button', { name: 'Select parent element', exact: true })
+        .evaluate((element) => element === (element.getRootNode() as ShadowRoot).activeElement),
+    ).toBe(true);
     await feedback.fill('Local website demo feedback');
     await page
       .locator('[data-ainotation-ui="markers"]')

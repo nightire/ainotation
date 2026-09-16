@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'vite-plus';
@@ -37,12 +38,13 @@ async function withEditor(
     await web.listen();
     const address = web.httpServer!.address();
     if (!address || typeof address === 'string') throw new Error('Missing test address');
+    const captureTitle = `Ainotation Image Test ${randomUUID()}`;
     browser = await chromium.launch({
       channel: 'chrome',
       headless: true,
       args: [
         '--auto-accept-this-tab-capture',
-        '--auto-select-tab-capture-source-by-title=Ainotation Image Test',
+        `--auto-select-tab-capture-source-by-title=${captureTitle}`,
         '--enable-usermedia-screen-capturing',
         '--force-color-profile=srgb',
       ],
@@ -55,9 +57,9 @@ async function withEditor(
     const errors: string[] = [];
     configurePage(page, errors);
     await page.goto(`http://127.0.0.1:${address.port}/`);
-    await page.evaluate(() => {
-      document.title = 'Ainotation Image Test';
-    });
+    await page.evaluate((title) => {
+      document.title = title;
+    }, captureTitle);
     const shell = page.locator('ainotation-inspector-shell');
     await expect
       .poll(() => shell.evaluate((el) => (el as InspectorShell).view.connection), {
@@ -66,7 +68,24 @@ async function withEditor(
       .toBe('connected');
     await shell.getByRole('button', { name: 'Open inspector', exact: true }).click();
     await page.locator('h1').click({ position: { x: 30, y: 10 } });
-    await run(page, client);
+    try {
+      await run(page, client);
+    } catch (error) {
+      const state = await shell
+        .evaluate((element) => {
+          const view = (element as InspectorShell).view;
+          return {
+            message: view.message,
+            editorOpen: view.editorOpen,
+            visibility: (element as HTMLElement).style.visibility,
+            drawing: !!document.querySelector('[data-ainotation-ui="drawing"]'),
+          };
+        })
+        .catch(() => null);
+      throw new Error(`Image test failed; editor state: ${JSON.stringify(state)}`, {
+        cause: error,
+      });
+    }
     expect(errors).toEqual([]);
   } finally {
     await browser?.close();
@@ -200,6 +219,7 @@ it('crops a real high-DPI tab using capture pixels and preserves host UI plus an
       document.body.append(panel);
     });
     const markers = page.locator('[data-ainotation-ui="markers"]');
+    await page.bringToFront();
     await markers.getByRole('button', { name: 'Screenshot', exact: true }).click();
     const editor = page.locator('[data-ainotation-ui="drawing"]');
     await editor.locator('.drawing-surface').waitFor({ timeout: 10000 });
@@ -495,6 +515,7 @@ it.each(['button', 'touch', 'shortcut'] as const)(
         });
         document.body.append(trigger, menu, native);
       });
+      await page.bringToFront();
       await markers.getByRole('button', { name: 'Screenshot', exact: true }).click();
       const editor = page.locator('[data-ainotation-ui="drawing"]');
       await editor.locator('.drawing-surface').waitFor({ timeout: 10000 });
@@ -645,6 +666,7 @@ it.each(['button', 'touch', 'shortcut'] as const)(
       expect(pixels.popover[1]! - pixels.popover[2]!).toBeGreaterThan(50);
       expect(pixels.stroke[0]).toBeGreaterThan(180);
       // Start a second drawing session, then confirm native host behavior still works.
+      await page.bringToFront();
       await markers.getByRole('button', { name: 'Screenshot', exact: true }).click();
       await editor.locator('.drawing-surface').waitFor({ timeout: 10000 });
       await page.keyboard.down('Alt');
@@ -1218,6 +1240,7 @@ it('captures a real browser tab after live drawing and temporary Alt interaction
       document.body.append(modal);
       modal.querySelector('button')!.addEventListener('click', () => modal.close());
     });
+    await page.bringToFront();
     await markers.getByRole('button', { name: 'Screenshot', exact: true }).click();
     const editor = page.locator('[data-ainotation-ui="drawing"]');
     await editor.locator('.drawing-surface').waitFor({ timeout: 10000 });

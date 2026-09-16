@@ -1,6 +1,7 @@
 import type { MarkerAnchor, PageSnapshot, TargetSnapshot } from '@ainotation/schema';
 import { parentElement, excludedElement, toolNode, hitTest } from './dom';
 import { captureAttributes, captureDomContext } from './dom-context';
+import { selectorFor } from './selector';
 import { captureTextRange, rangeBetween, textCaretAt, type TextCaret } from './text-selection';
 
 type Availability = 'available' | 'missing' | 'ambiguous';
@@ -58,33 +59,6 @@ function query(root: Document | ShadowRoot, selector: string): Element[] {
   } catch {
     return [];
   }
-}
-
-function selectorFor(element: Element, root: Document | ShadowRoot): string {
-  const id = element.getAttribute('id');
-  if (id) {
-    const selector = `#${CSS.escape(id)}`;
-    if (selector.length <= 4000 && query(root, selector).length === 1) return selector;
-  }
-  const testId = element.getAttribute('data-testid');
-  if (testId) {
-    const selector = `[data-testid="${CSS.escape(testId)}"]`;
-    if (selector.length <= 4000 && query(root, selector).length === 1) return selector;
-  }
-  const parts: string[] = [];
-  for (let current: Element | null = element; current; current = current.parentElement) {
-    const siblings = current.parentElement?.children ?? root.children;
-    const peers = Array.from(siblings).filter(
-      (sibling) =>
-        sibling.localName === current.localName && sibling.namespaceURI === current.namespaceURI,
-    );
-    parts.unshift(`${CSS.escape(current.localName)}:nth-of-type(${peers.indexOf(current) + 1})`);
-  }
-  const selector = parts.join(' > ');
-  if (selector.length > 4000 || query(root, selector).length !== 1) {
-    throw new Error('Cannot create a unique target selector within the snapshot limits.');
-  }
-  return selector;
 }
 
 function visibleText(element: Element, excluded: (element: Element) => boolean): string {
@@ -158,6 +132,7 @@ export function createSelection(options: Options) {
   let elementIds = new WeakMap<Element, string>();
   // Keep identity tombstones even after a weak reference is collected or detached.
   const references = new Map<string, WeakRef<Element>>();
+  const ancestryHistory = new Map<string, TargetSnapshot[]>();
   const watched = new Map<string, { target: TargetSnapshot; status: Availability }>();
   let picking = false;
   let passthrough = false;
@@ -218,6 +193,12 @@ export function createSelection(options: Options) {
       !element ||
       !usable(element) ||
       element.localName !== target.tagName ||
+      (target.tagName === 'img' &&
+        ['src', 'alt'].some(
+          (name) =>
+            Object.hasOwn(target.attributes, name) &&
+            element.getAttribute(name) !== target.attributes[name],
+        )) ||
       visibleText(element, excluded) !== target.text ||
       fingerprintAttributes.some(
         (name) =>
@@ -438,6 +419,7 @@ export function createSelection(options: Options) {
 
   function select(element: Element, additive = false) {
     if (destroyed || !usable(element)) return;
+    ancestryHistory.clear();
     const existing = targets.findIndex((target) => references.get(target.id)?.deref() === element);
     if (additive && existing >= 0) {
       targets.splice(existing, 1);
@@ -455,6 +437,7 @@ export function createSelection(options: Options) {
     checkLimit(value.length);
     const next = structuredClone(value);
     if (JSON.stringify(next) === JSON.stringify(targets)) return;
+    ancestryHistory.clear();
     endBatch(false);
     targets = next;
     changed();
@@ -588,6 +571,7 @@ export function createSelection(options: Options) {
     additive: boolean,
     textSelection?: TargetSnapshot['textSelection'],
   ) {
+    ancestryHistory.clear();
     pointerPosition = point;
     if (additive) {
       shiftHeld = true;
@@ -615,6 +599,7 @@ export function createSelection(options: Options) {
 
   function clear() {
     if (destroyed) return;
+    ancestryHistory.clear();
     if (press) cancelledPointer = press.pointerId;
     press = null;
     clearTextRange();
@@ -875,11 +860,55 @@ export function createSelection(options: Options) {
   window.addEventListener('resize', schedule, { signal: abort.signal });
   observeRoots();
 
+  function navigationCandidate(id: string, direction: 'parent' | 'back') {
+    const target = targets.find((target) => target.id === id);
+    if (!target) return;
+    const current = resolve(target).element;
+    if (!current || !usable(current)) return;
+    const previous = ancestryHistory.get(id)?.at(-1);
+    const candidate =
+      direction === 'parent' ? parentElement(current) : previous && resolve(previous).element;
+    if (
+      !candidate ||
+      !usable(candidate) ||
+      candidate === document.documentElement ||
+      (direction === 'back' && parentElement(candidate) !== current) ||
+      targets.some((other) => other.id !== id && resolve(other).element === candidate)
+    )
+      return;
+    return { candidate, previous };
+  }
+
   return {
+    targetNavigation(id: string) {
+      return {
+        parent: !!navigationCandidate(id, 'parent'),
+        back: !!navigationCandidate(id, 'back'),
+      };
+    },
+    navigateTarget(id: string, direction: 'parent' | 'back') {
+      const found = navigationCandidate(id, direction);
+      if (!found) return false;
+      const index = targets.findIndex((target) => target.id === id);
+      const history = ancestryHistory.get(id) ?? [];
+      const replacement =
+        direction === 'parent' ? snapshot(found.candidate) : structuredClone(found.previous!);
+      const nextHistory =
+        direction === 'parent'
+          ? [...history, structuredClone(targets[index]!)]
+          : history.slice(0, -1);
+      ancestryHistory.delete(id);
+      ancestryHistory.set(replacement.id, nextHistory);
+      targets[index] = replacement;
+      clearTextRange();
+      changed();
+      return true;
+    },
     resetPage() {
       clear();
       references.clear();
       watched.clear();
+      ancestryHistory.clear();
       elementIds = new WeakMap();
     },
     setTheme(theme: string) {
@@ -930,6 +959,7 @@ export function createSelection(options: Options) {
       targets = [];
       references.clear();
       watched.clear();
+      ancestryHistory.clear();
       elementIds = new WeakMap();
       if (picking) {
         picking = false;

@@ -34,6 +34,7 @@ export interface DraftRecord {
     editorOpen?: boolean;
     page?: PageSnapshot;
     images?: FeedbackImage[];
+    targetsAdjusted?: boolean;
   };
   images?: Record<string, Blob>;
   authority: string | null;
@@ -161,6 +162,7 @@ export async function createDraftStore(options: {
         draft: {
           text: typeof value.draft.text === 'string' ? value.draft.text.slice(0, 10000) : '',
           editingId: typeof value.draft.editingId === 'string' ? value.draft.editingId : null,
+          ...(value.draft.targetsAdjusted ? { targetsAdjusted: true } : {}),
           targets: TargetSnapshotSchema.array().max(20).parse(value.draft.targets),
           ...(draftImages.length ? { images: draftImages } : {}),
           ...(value.draft.marker ? { marker: MarkerAnchorSchema.parse(value.draft.marker) } : {}),

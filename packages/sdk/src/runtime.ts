@@ -19,6 +19,7 @@ import { developmentBridge, type DevelopmentConnection } from './core/developmen
 import { requestCapture } from './core/capture';
 import { describeImage } from './core/images';
 import { themeStyles } from './ui/theme';
+import { targetLocatorText } from './ui/target-description';
 import {
   createI18n,
   detectLocale,
@@ -59,6 +60,7 @@ export async function createRuntime(
   let syncGeneration = 0;
   let saving = false;
   let editorVersion = 0;
+  let adjustingTarget = false;
   let selectionPage: PageSnapshot | null = null;
   let drawing: AbortController | null = null;
   const imageUrls = new Map<string, string>();
@@ -128,6 +130,9 @@ export async function createRuntime(
   storageReady = true;
 
   function updateAvailability() {
+    view.targetNavigation = Object.fromEntries(
+      view.selected.map((target) => [target.id, selection.targetNavigation(target.id)]),
+    );
     view.availability = Object.fromEntries(
       [
         ...view.selected,
@@ -139,7 +144,7 @@ export async function createRuntime(
     visible: shell.expanded,
     appearance: { theme: view.theme, cssText: themeStyles.cssText },
     onChange() {
-      if (disposed) return;
+      if (disposed || adjustingTarget) return;
       if (reconcilePage()) return;
       if (!view.editorOpen) view.selected = selection.getTargets();
       updateAvailability();
@@ -156,6 +161,7 @@ export async function createRuntime(
     onSelect(anchor, targets) {
       if (disposed || reconcilePage() || view.storage === 'loading') return;
       editorVersion++;
+      view.targetsAdjusted = false;
       if (view.editingId) {
         view.draft = '';
         view.images = [];
@@ -167,6 +173,7 @@ export async function createRuntime(
       view.editorOpen = true;
       view.message = '';
       delete view.messageDescriptor;
+      updateAvailability();
       render();
       void saveDraft().catch(report);
     },
@@ -178,6 +185,7 @@ export async function createRuntime(
         return;
       }
       editorVersion++;
+      view.targetsAdjusted = false;
       if (view.editingId) {
         view.draft = '';
         view.images = [];
@@ -217,6 +225,8 @@ export async function createRuntime(
   function resetEditor() {
     drawing?.abort();
     editorVersion++;
+    view.targetsAdjusted = false;
+    view.targetNavigation = {};
     selectionPage = null;
     view.selected = [];
     view.draft = '';
@@ -266,6 +276,7 @@ export async function createRuntime(
       ...(view.marker ? { marker: view.marker } : {}),
       ...(selectionPage ? { page: selectionPage } : {}),
       editorOpen: view.editorOpen,
+      ...(view.targetsAdjusted ? { targetsAdjusted: true } : {}),
     };
   }
   async function saveDraft() {
@@ -362,6 +373,7 @@ export async function createRuntime(
     view.marker = next.draft.marker ?? fallbackAnchor(next.draft.targets);
     view.editorOpen = next.draft.editorOpen ?? next.draft.targets.length > 0;
     view.selected = structuredClone(next.draft.targets);
+    view.targetsAdjusted = next.draft.targetsAdjusted ?? false;
     selectionPage = next.draft.page ?? (view.editorOpen ? capturePage() : null);
     selection.setVisible(shell.expanded);
     accept(next);
@@ -469,6 +481,61 @@ export async function createRuntime(
       render();
     }
   }
+  async function navigateTarget(action: Extract<InspectorAction, { type: 'navigate-target' }>) {
+    if (!view.editorOpen || saving || drawing) return;
+    const anchor = view.marker;
+    const oldTarget = view.selected.find((target) => target.id === action.id);
+    const rect = oldTarget && selection.getRect(oldTarget);
+    const point = anchor
+      ? {
+          x:
+            rect && anchor.targetId === action.id && Number.isFinite(anchor.ratioX)
+              ? rect.x + rect.width * anchor.ratioX!
+              : anchor.x - (anchor.space === 'document' ? scrollX : 0),
+          y:
+            rect && anchor.targetId === action.id && Number.isFinite(anchor.ratioY)
+              ? rect.y + rect.height * anchor.ratioY!
+              : anchor.y - (anchor.space === 'document' ? scrollY : 0),
+        }
+      : null;
+    const index = view.selected.findIndex((target) => target.id === action.id);
+    if (index < 0) return;
+    let adjusted = false;
+    adjustingTarget = true;
+    try {
+      adjusted = selection.navigateTarget(action.id, action.direction);
+    } finally {
+      adjustingTarget = false;
+    }
+    if (!adjusted) return;
+    editorVersion++;
+    view.selected = selection.getTargets();
+    view.message = '';
+    delete view.messageDescriptor;
+    const original = view.document?.annotations.find(
+      (annotation) => annotation.id === view.editingId,
+    );
+    view.targetsAdjusted =
+      !original ||
+      original.targets.length !== view.selected.length ||
+      original.targets.some((target, index) => target.id !== view.selected[index]?.id);
+    selectionPage = capturePage();
+    if (anchor && point && anchor.targetId === action.id) {
+      const replacement = view.selected[index]!;
+      const bounds = selection.getRect(replacement) ?? replacement.rect;
+      view.marker = {
+        ...anchor,
+        targetId: replacement.id,
+        x: point.x + (anchor.space === 'document' ? scrollX : 0),
+        y: point.y + (anchor.space === 'document' ? scrollY : 0),
+        ratioX: bounds.width ? (point.x - bounds.x) / bounds.width : undefined,
+        ratioY: bounds.height ? (point.y - bounds.y) / bounds.height : undefined,
+      };
+    }
+    updateAvailability();
+    render();
+    await saveDraft();
+  }
   async function copy() {
     if (reconcilePage()) throw uiError('pageLoading');
     if (!record) throw uiError('feedbackLoading');
@@ -544,6 +611,10 @@ export async function createRuntime(
       return;
     }
     if (!record) throw uiError('feedbackLoading');
+    if (action.type === 'navigate-target') {
+      await navigateTarget(action);
+      return;
+    }
     if (
       action.type === 'screenshot' ||
       action.type === 'import-image' ||
@@ -651,6 +722,20 @@ export async function createRuntime(
       await copy();
       return;
     }
+    if (action.type === 'copy-selector') {
+      const target = [
+        ...view.selected,
+        ...record.document.annotations.flatMap((annotation) => annotation.targets),
+      ].find((target) => target.id === action.id);
+      if (!target) throw uiError('missingAnnotation');
+      try {
+        await navigator.clipboard.writeText(targetLocatorText(target));
+      } catch {
+        throw uiError('clipboardFailed');
+      }
+      message(msg('selectorCopied'));
+      return;
+    }
     if (action.type === 'export') {
       const images = record.document.annotations.flatMap((annotation) => annotation.images ?? []);
       if (images.length) await downloads.exportImages(record.document, record.images ?? {});
@@ -711,15 +796,23 @@ export async function createRuntime(
           comment: draft,
           createdAt: existing?.createdAt || now,
           updatedAt: now,
-          page: existing?.page ?? selectionPage ?? capturePage(),
-          targets: existing?.targets ?? structuredClone(view.selected),
-          ...(existing
-            ? existing.marker
-              ? { marker: existing.marker }
+          page: submittedDraft.targetsAdjusted
+            ? (submittedDraft.page ?? capturePage())
+            : (existing?.page ?? selectionPage ?? capturePage()),
+          targets: submittedDraft.targetsAdjusted
+            ? submittedDraft.targets
+            : (existing?.targets ?? structuredClone(view.selected)),
+          ...(submittedDraft.targetsAdjusted
+            ? submittedDraft.marker
+              ? { marker: submittedDraft.marker }
               : {}
-            : view.marker
-              ? { marker: view.marker }
-              : {}),
+            : existing
+              ? existing.marker
+                ? { marker: existing.marker }
+                : {}
+              : view.marker
+                ? { marker: view.marker }
+                : {}),
           status: existing?.status || 'pending',
           replies: existing?.replies || [],
           ...(view.images.length ? { images: structuredClone(view.images) } : {}),
@@ -742,6 +835,7 @@ export async function createRuntime(
     if (!annotation) throw uiError('missingAnnotation');
     if (action.type === 'edit') {
       editorVersion++;
+      view.targetsAdjusted = false;
       view.message = '';
       delete view.messageDescriptor;
       view.editingId = annotation.id;
