@@ -17,7 +17,7 @@
     "check": "vp check",
     "ready": "vp check && vp run typecheck && vp run test && vp run build",
     "changeset": "changeset",
-    "version-packages": "changeset version && vp install --lockfile-only",
+    "version-packages": "changeset version && vp install --lockfile-only && vp fmt packages/*/CHANGELOG.md",
     "build:packages": "vp run --filter @ainotation/schema --filter @ainotation/sdk --filter @ainotation/mcp --filter @ainotation/vite build",
     "release": "node scripts/publish-packages.mjs",
     "release:check": "node scripts/check-packages.mjs"

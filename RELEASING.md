@@ -17,7 +17,8 @@ vp run changeset
 
 The release workflow validates the repository and opens a version pull request
 when pending changesets are found. Review and merge that PR to publish the next
-version. Stable releases require explicitly exiting prerelease mode in a reviewed
+version. The `version-packages` script also formats generated changelogs so the
+version PR passes the repository's formatting checks. Stable releases require explicitly exiting prerelease mode in a reviewed
 change:
 
 ```sh
