@@ -216,6 +216,22 @@ it('returns authoritative snapshots and binds sessions permanently to URL and or
   );
 });
 
+it('enforces annotation page isolation through the legacy HTTP endpoint', async () => {
+  const { document, sync, store } = await setup();
+  const foreign = fixture(`${origin}/other-page`).annotations[0]!;
+  for (const input of [
+    { document: { ...document, annotations: [foreign] }, operations: [] },
+    { document, operations: [{ id: randomUUID(), kind: 'upsert', annotation: foreign }] },
+  ]) {
+    const response = await sync(input);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: 'Annotation page URL must match document URL',
+    });
+    expect(store.list()).toEqual([]);
+  }
+});
+
 it('streams initial and changed events, heartbeats, and closes subscriptions on disconnect/shutdown', async () => {
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   const { server, document, headers, sync, store } = await setup();

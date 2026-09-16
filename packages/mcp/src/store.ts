@@ -12,6 +12,7 @@ import {
   type SyncRequest,
   type SyncResponse,
   type FeedbackImage,
+  type SyncErrorCode,
   MAX_IMAGE_BYTES,
   MAX_IMAGE_PIXELS,
 } from '@ainotation/schema';
@@ -73,7 +74,7 @@ export class StoreError extends Error {
   constructor(
     public readonly status: number,
     message: string,
-    public readonly code?: string,
+    public readonly code?: SyncErrorCode,
   ) {
     super(message);
     this.name = 'StoreError';
@@ -86,6 +87,10 @@ function documentOrigin(document: FeedbackDocument): string {
     throw new StoreError(400, 'Document URL must be an HTTP(S) URL without credentials');
   }
   return url.origin;
+}
+
+function validateAnnotationPage(url: string, pageUrl: string): void {
+  if (pageUrl !== url) throw new StoreError(400, 'Annotation page URL must match document URL');
 }
 
 function validateSession(session: Session): void {
@@ -402,6 +407,11 @@ export class FeedbackStore {
       ) {
         throw new StoreError(409, 'Session is bound to another document');
       }
+      for (const annotation of request.document.annotations)
+        validateAnnotationPage(request.document.url, annotation.page.url);
+      for (const operation of request.operations)
+        if (operation.kind === 'upsert')
+          validateAnnotationPage(request.document.url, operation.annotation.page.url);
       const revision =
         previous && createHash('sha256').update(JSON.stringify(previous)).digest('hex');
       const resolving = request.recovery && previous;
@@ -506,8 +516,7 @@ export class FeedbackStore {
     return this.mutate(async () => {
       const document = this.get(sessionId);
       const session = this.sessions.get(sessionId)!;
-      if (content.page.url !== document.url)
-        throw new StoreError(400, 'Annotation page URL must match document URL');
+      validateAnnotationPage(document.url, content.page.url);
       if (session.tombstones.includes(content.id))
         throw new StoreError(409, 'Annotation ID was deleted');
       const existing = document.annotations.find((annotation) => annotation.id === content.id);
@@ -546,8 +555,7 @@ export class FeedbackStore {
       const document = this.get(sessionId);
       const annotation = document.annotations.find((item) => item.id === annotationId);
       if (!annotation) throw new StoreError(404, 'Annotation not found in session');
-      if (patch.page !== undefined && patch.page.url !== document.url)
-        throw new StoreError(400, 'Annotation page URL must match document URL');
+      if (patch.page !== undefined) validateAnnotationPage(document.url, patch.page.url);
       const before = structuredClone(annotation);
       if (patch.comment !== undefined) annotation.comment = patch.comment;
       if (patch.page !== undefined) annotation.page = patch.page;

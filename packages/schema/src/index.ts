@@ -141,6 +141,18 @@ export const SyncRequestSchema = z.object({
     })
     .optional(),
 });
+
+/** Machine-readable diagnostics shared by the service, dev proxy and browser client. */
+export const SyncErrorCodeSchema = z.enum([
+  'recovery-stale',
+  'storage-conflict',
+  'storage-unavailable',
+  'storage-damaged',
+  'service-ownership',
+]);
+export const SyncErrorResponseSchema = z.object({ code: SyncErrorCodeSchema.optional() });
+export type SyncErrorCode = z.infer<typeof SyncErrorCodeSchema>;
+
 export const SyncResponseSchema = z
   .object({
     document: FeedbackDocumentSchema,

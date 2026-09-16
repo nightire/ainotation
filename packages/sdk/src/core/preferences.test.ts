@@ -1,5 +1,5 @@
 import { openDB } from 'idb';
-import { afterEach, expect, it } from 'vite-plus/test';
+import { afterEach, expect, it, vi } from 'vite-plus/test';
 import {
   readInspectorPosition,
   writeInspectorPosition,
@@ -16,6 +16,7 @@ const project = () => {
   return id;
 };
 afterEach(async () => {
+  vi.restoreAllMocks();
   const db = await openDB('ainotation-settings', 1);
   try {
     for (const key of projects.splice(0)) {
@@ -28,6 +29,40 @@ afterEach(async () => {
   } finally {
     db.close();
   }
+});
+
+it('keeps a new theme authoritative when the localStorage cache cannot be updated', async () => {
+  const key = project();
+  await writeTheme(key, 'light');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new DOMException('Full', 'QuotaExceededError');
+  });
+  const writing = writeTheme(key, 'dark');
+  expect(await readTheme(key)).toBe('dark');
+  await writing;
+  expect(await readTheme(key)).toBe('dark');
+  // A later page load must not restore a stale cache in preference to IndexedDB.
+  expect(localStorage.getItem(`ainotation:theme:${key}`)).toBeNull();
+  const db = await openDB('ainotation-settings', 1);
+  try {
+    expect(await db.get('preferences', ['theme', key])).toBe('dark');
+  } finally {
+    db.close();
+  }
+});
+
+it('retains the new preference in memory when both persistence paths fail', async () => {
+  const key = project();
+  await writeTheme(key, 'light');
+  for (const method of ['setItem', 'removeItem'] as const)
+    vi.spyOn(Storage.prototype, method).mockImplementation(() => {
+      throw new DOMException('Unavailable', 'SecurityError');
+    });
+  vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+    throw new DOMException('Full', 'QuotaExceededError');
+  });
+  await expect(writeTheme(key, 'dark')).rejects.toThrow();
+  expect(await readTheme(key)).toBe('dark');
 });
 
 it('restores the latest pending position without overwriting output detail or another project', async () => {

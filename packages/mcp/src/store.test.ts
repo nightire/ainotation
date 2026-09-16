@@ -178,6 +178,35 @@ it('serializes concurrent actions and sync without losing replies or status', as
   });
 });
 
+it.each(['snapshot', 'operation'] as const)(
+  'rejects cross-page annotations in a sync %s before persisting or acknowledging them',
+  async (source) => {
+    const store = await createFeedbackStore();
+    const document = fixture();
+    await store.sync(document.id, { document, operations: [] }, origin);
+    const foreign = fixture(`${origin}/other-page`).annotations[0]!;
+    const operation: FeedbackOperation = { id: randomUUID(), kind: 'upsert', annotation: foreign };
+    const changed = vi.fn();
+    store.subscribe(document.id, changed);
+    await expect(
+      store.sync(
+        document.id,
+        {
+          document: source === 'snapshot' ? { ...document, annotations: [foreign] } : document,
+          operations: source === 'operation' ? [operation] : [],
+        },
+        origin,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(store.get(document.id)).toEqual(document);
+    expect(changed).not.toHaveBeenCalled();
+    foreign.page.url = document.url;
+    const retried = await store.sync(document.id, { document, operations: [operation] }, origin);
+    expect(retried.acknowledged).toEqual([operation.id]);
+    expect(retried.document.annotations.at(-1)).toEqual(foreign);
+  },
+);
+
 it('persists documents, deduplication IDs and tombstones with private filesystem permissions', async () => {
   const directory = await temporary();
   const filePath = join(directory, 'private', 'feedback.json');

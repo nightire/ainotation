@@ -182,16 +182,6 @@ export async function startProjectHttpServer(options: {
           throw new StoreError(403, 'Browser connection required');
         const sessionId = z.uuid().parse(browserSync[1]);
         const input = SyncRequestSchema.parse(await readJson(request));
-        if (
-          input.document.annotations.some(
-            (annotation) => annotation.page.url !== input.document.url,
-          ) ||
-          input.operations.some(
-            (operation) =>
-              operation.kind === 'upsert' && operation.annotation.page.url !== input.document.url,
-          )
-        )
-          throw new StoreError(400, 'Annotation page URL must match document URL');
         scope = await scopeFor(request); // Revocation/expiry may occur while receiving the body.
         if (scope.grant.kind !== 'browser')
           throw new StoreError(403, 'Browser connection required');

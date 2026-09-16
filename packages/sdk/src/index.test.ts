@@ -59,6 +59,35 @@ describe('SDK lifecycle', () => {
     expect(shell.view.picking).toBe(false);
   });
 
+  it('waits for runtime readiness when mount is called after the shell is inserted', async () => {
+    const { createAinotation } = await import('./index.js');
+    const container = document.createElement('div');
+    document.body.append(container);
+    containers.push(container);
+    const instance = createAinotation({ container, mcp: false });
+    instances.push(instance);
+    let repeated: Promise<void> | undefined;
+    let readyDocument: ReturnType<Ainotation['getDocument']> = null;
+    const observer = new MutationObserver(() => {
+      if (!container.querySelector('ainotation-inspector-shell')) return;
+      observer.disconnect();
+      repeated = instance.mount();
+      void repeated.then(() => {
+        readyDocument = instance.getDocument();
+      });
+    });
+    observer.observe(container, { childList: true });
+    try {
+      const mounting = instance.mount();
+      await mounting;
+      await repeated;
+      expect(repeated).toBe(mounting);
+      expect(readyDocument).not.toBeNull();
+    } finally {
+      observer.disconnect();
+    }
+  });
+
   it('opens into picking, minimizes without destroying, and supports explicit teardown', async () => {
     const { createAinotation } = await import('./index.js');
     const onDestroy = vi.fn();

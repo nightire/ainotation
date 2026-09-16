@@ -1,4 +1,4 @@
-import { SyncResponseSchema } from '@ainotation/schema';
+import { SyncResponseSchema, SyncErrorResponseSchema } from '@ainotation/schema';
 import type { DraftRecord } from './storage';
 import type { SyncResponse, SyncRequest } from '@ainotation/schema';
 import { syncImages } from './image-sync';
@@ -107,16 +107,16 @@ export function createSyncClient(options: {
             },
           );
           if (!response.ok) {
-            const diagnostic = (await response.json().catch(() => ({}))) as { code?: string };
-            if (diagnostic.code === 'recovery-stale' && recovery) {
+            const diagnostic = SyncErrorResponseSchema.safeParse(
+              await response.json().catch(() => undefined),
+            );
+            const code = diagnostic.success ? diagnostic.data.code : undefined;
+            if (code === 'recovery-stale' && recovery) {
               recovery = undefined;
               wanted = true;
               continue;
             }
-            if (
-              diagnostic.code?.startsWith('storage-') ||
-              diagnostic.code === 'service-ownership'
-            ) {
+            if (code?.startsWith('storage-') || code === 'service-ownership') {
               paused = true;
               problem = msg('syncStorageFailed');
               throw uiError('syncStorageFailed');

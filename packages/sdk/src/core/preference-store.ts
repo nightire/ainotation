@@ -30,10 +30,13 @@ export function createPreference<T>(options: {
     decode: (value: string) => unknown;
   };
 }) {
-  const pending = new Map<string, T>();
+  const pending = new Map<string, { value: T }>();
+  const staleCaches = new Set<string>();
   const writes = new Map<string, Promise<void>>();
   const immediate = (project: string): T | undefined => {
-    if (options.cache) {
+    const current = pending.get(project);
+    if (current) return current.value;
+    if (options.cache && !staleCaches.has(project)) {
       try {
         const raw = localStorage.getItem(options.cache.key(project));
         const value = raw === null ? undefined : options.parse(options.cache.decode(raw));
@@ -42,7 +45,7 @@ export function createPreference<T>(options: {
         /* Keep working with IndexedDB or the pending in-memory value. */
       }
     }
-    return pending.get(project);
+    return undefined;
   };
   return {
     async read(project: string): Promise<T | undefined> {
@@ -58,22 +61,31 @@ export function createPreference<T>(options: {
     write(project: string, value: T): Promise<void> {
       const parsed = options.parse(value);
       if (parsed === undefined) return Promise.reject(new Error('Invalid preference value'));
-      const snapshot = structuredClone(parsed);
+      // Identity belongs to the write, even when two writes contain the same value.
+      const snapshot = { value: structuredClone(parsed) };
       pending.set(project, snapshot);
       let cached = false;
       if (options.cache) {
         try {
-          localStorage.setItem(options.cache.key(project), options.cache.encode(snapshot));
+          localStorage.setItem(options.cache.key(project), options.cache.encode(snapshot.value));
+          staleCaches.delete(project);
           cached = true;
         } catch {
-          /* IndexedDB can still persist this change. */
+          // Never let an older cache mask the new IndexedDB or in-memory value.
+          staleCaches.add(project);
+          try {
+            localStorage.removeItem(options.cache.key(project));
+            staleCaches.delete(project);
+          } catch {
+            /* Ignore the stale cache for this instance if removal is also blocked. */
+          }
         }
       }
       const work = (writes.get(project) ?? Promise.resolve())
         .catch(() => {})
         .then(async () => {
           try {
-            await withDatabase((db) => db.put('preferences', snapshot, options.key(project)));
+            await withDatabase((db) => db.put('preferences', snapshot.value, options.key(project)));
           } catch (error) {
             if (!cached) throw error;
           }

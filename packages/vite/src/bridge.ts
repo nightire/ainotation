@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { MAX_IMAGE_BYTES, SyncRequestSchema } from '@ainotation/schema';
+import { MAX_IMAGE_BYTES, SyncRequestSchema, SyncErrorResponseSchema } from '@ainotation/schema';
 import type { ProjectInfo } from '@ainotation/mcp/project';
 import type { createBrowserConnection } from '@ainotation/mcp/browser';
 
@@ -154,8 +154,11 @@ export function createDevelopmentBridge(options: {
           signal,
         });
         if (!upstream.ok || !upstream.body) {
-          await upstream.body?.cancel();
+          const diagnostic = SyncErrorResponseSchema.safeParse(
+            await upstream.json().catch(() => undefined),
+          );
           json(response, upstream.ok ? 502 : upstream.status, {
+            ...(diagnostic.success && diagnostic.data.code ? { code: diagnostic.data.code } : {}),
             error: 'Project sync failed. Check the development server connection.',
           });
           return;

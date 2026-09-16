@@ -44,8 +44,8 @@ export function createAinotation(options: AinotationOptions = {}): Ainotation {
 
   return {
     mount(): Promise<void> {
-      if (shell) return Promise.resolve();
       if (pending) return pending;
+      if (shell) return Promise.resolve();
       if (typeof document === 'undefined' || !document.body) {
         return Promise.reject(new Error('Mount Ainotation after the browser document is ready.'));
       }

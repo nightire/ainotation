@@ -105,6 +105,53 @@ it('reuploads a missing server image even when it was already uploaded by this c
   expect(fetcher.mock.calls.every(([, init]) => init?.method === 'POST')).toBe(true);
 });
 
+it('refreshes a stale recovery choice before applying any server snapshot', async () => {
+  const document = createFeedbackDocument(location.href);
+  const recovery = {
+    epoch: crypto.randomUUID(),
+    revision: 'a'.repeat(64),
+    source: 'browser' as const,
+  };
+  const latest = {
+    document,
+    acknowledged: [],
+    storageEpoch: recovery.epoch,
+    recovery: { revision: 'b'.repeat(64) },
+  };
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(Response.json({ code: 'recovery-stale' }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json(latest));
+  const apply = vi.fn(async () => {});
+  const onRecovery = vi.fn(async () => {});
+  const client = createSyncClient({
+    connection: { endpoint: 'http://127.0.0.1:4748', token: 'test-token' },
+    sessionId: document.id,
+    recovery,
+    read: async () => ({
+      document,
+      operations: [],
+      draft: { text: '', editingId: null, targets: [] },
+      authority: null,
+    }),
+    apply,
+    onRecovery,
+    onState() {},
+    onSync() {},
+  });
+  try {
+    await client.finished;
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const requests = fetcher.mock.calls.map(([, init]) => JSON.parse(init!.body as string));
+    expect(requests[0].recovery).toEqual(recovery);
+    expect(requests[1]).not.toHaveProperty('recovery');
+    expect(onRecovery).toHaveBeenCalledExactlyOnceWith(latest);
+    expect(apply).not.toHaveBeenCalled();
+  } finally {
+    client.stop();
+  }
+});
+
 it('allows only explicit loopback endpoints and header-safe pairing tokens', () => {
   expect(
     normalizeConnection({ endpoint: 'http://127.0.0.1:4748/', token: ' test-token ' }),

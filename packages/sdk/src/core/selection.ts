@@ -1,5 +1,6 @@
 import type { MarkerAnchor, PageSnapshot, TargetSnapshot } from '@ainotation/schema';
-import { parentElement, excludedElement, toolNode, hitTest } from './dom';
+import { parentElement, excludedElement, hitTest } from './dom';
+import { createDomObserver } from './dom-observer';
 import { captureAttributes, captureDomContext } from './dom-context';
 import { selectorFor } from './selector';
 import { captureTextRange, rangeBetween, textCaretAt, type TextCaret } from './text-selection';
@@ -327,36 +328,14 @@ export function createSelection(options: Options) {
   }
 
   const resize = new ResizeObserver(schedule);
-  const observer = new MutationObserver((records) => {
-    const meaningful = records.some((record) => {
-      const element =
-        record.target instanceof Element ? record.target : record.target.parentElement;
-      if (element && toolNode(element)) return false;
-      if (record.type !== 'childList') return true;
-      return [...record.addedNodes, ...record.removedNodes].some((node) => !toolNode(node));
-    });
-    if (meaningful) {
-      observeRoots();
-      schedule();
-    }
+  const observer = createDomObserver({
+    onChange: schedule,
+    ...(options.exclude ? { exclude: options.exclude } : {}),
   });
 
   function observeRoots() {
-    // Rebuild subscriptions so removed shadow trees are not retained by observers.
-    observer.disconnect();
-    if (!visible) return;
-    const visit = (root: Document | ShadowRoot) => {
-      observer.observe(root, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        characterData: true,
-      });
-      for (const element of root.querySelectorAll('*')) {
-        if (element.shadowRoot && !excluded(element)) visit(element.shadowRoot);
-      }
-    };
-    visit(document);
+    if (visible) observer.refresh();
+    else observer.disconnect();
   }
 
   function observeSizes() {
