@@ -1,5 +1,30 @@
 # @ainotation/sdk
 
+## 1.0.0-beta.1
+
+### Minor Changes
+
+- b4e20f9: Generate bounded, uniquely verified CSS selectors using descriptive attributes, classes and ancestor scopes before positional fallback. Show readable target context with copyable selectors and expandable shadow-root details, and validate captured image source/alt attributes on restoration while retaining compatibility with older annotations.
+- 1e7c5ad: Add `mcp: false` for local-only instances that skip saved MCP credentials, connections and synchronization while retaining annotations, image attachments, copying and exporting. Settings explains local-only operation in all five supported languages.
+- b4e20f9: Add compact per-target parent and back controls to annotation popovers. Target changes preserve feedback drafts, attachments and marker position, support open shadow boundaries and independent multi-selection, and update saved annotation targets only on explicit save.
+- d994c13: Recover missing service state through an independent instance coordinator, repair loaded snapshots, retain JSON backups, and add doctor/repair/external-backup commands. Introduce storage epochs and missing-image negotiation, pause conflicting recovery before replacing browser feedback, and add project restoration and version-choice controls with retained local copies. Protect coordinator credentials from Vite file serving.
+
+### Patch Changes
+
+- 1e7c5ad: Use the Ainotation arrow-and-dot logo in the circular launcher and Settings, with the approved light and dark brand colors.
+- 5afa2bc: Share typed sync diagnostics across the service, Vite bridge and SDK so recovery conflicts and storage failures retain their intended behavior. Enforce annotation page isolation in the feedback store for both HTTP entry points. Make repeated SDK mounts await initialization and prevent stale preference caches from overriding newer local changes when storage writes fail.
+
+  Separate DOM subscription management from selection state and avoid full-document shadow-root rescans for ordinary style and text updates.
+
+- 47350c0: Isolate marker and feedback-editor interactions before host document capture handlers can dismiss menus and redirect clicks to underlying elements. Preserve native text editing, image picking, keyboard activation and Alt passthrough for mouse and touch input.
+- ba14fbb: Configure the service-directory deny rules before Vite compiles its filesystem matcher. This prevents access through /@fs when a custom Ainotation service directory is inside the host's allowed filesystem roots, including on Linux. Preserve Vite's default sensitive-file restrictions.
+
+  Wait for the browser to commit hidden editor controls before extracting a screenshot frame, improving capture consistency on slower machines.
+
+- Updated dependencies [5afa2bc]
+- Updated dependencies [d994c13]
+  - @ainotation/schema@1.0.0-beta.1
+
 ## 1.0.0-beta.0
 
 ### Major Changes
