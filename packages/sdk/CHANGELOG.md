@@ -20,6 +20,7 @@
 
 ### Patch Changes
 
+- Wait for a tab frame captured after screenshot controls are hidden, observing frames before repaint so static pages remain capturable. Reject queued older frames instead of returning them through the static-video fallback.
 - a55c3ab: Adopt the MIT License, removing the previous commercial-use restrictions. Permit personal and commercial use, modification, distribution, hosted services and proprietary integration under the standard MIT terms. Update package metadata and documentation, include the complete MIT text in every published package, and retain bundled third-party license notices. Previously published beta.0 and beta.1 archives retain their original license text.
 - Updated dependencies [5074d35]
 - Updated dependencies [a55c3ab]

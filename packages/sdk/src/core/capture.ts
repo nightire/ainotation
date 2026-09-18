@@ -81,11 +81,12 @@ export async function createScreenCapture(stream: MediaStream, signal: AbortSign
     throw error;
   }
   async function nextFrame() {
+    const requestedAt = performance.now();
     const waitSignal = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
     waitSignal.throwIfAborted();
     // Let the browser commit the editor's hidden controls before asking the
     // capture pipeline for its next frame, including on slower CI machines.
-    await new Promise<void>((resolve, reject) => {
+    const painted = new Promise<void>((resolve, reject) => {
       let frame = 0;
       const abort = () => {
         cancelAnimationFrame(frame);
@@ -100,8 +101,8 @@ export async function createScreenCapture(stream: MediaStream, signal: AbortSign
         frame = requestAnimationFrame(done);
       });
     });
-    waitSignal.throwIfAborted();
-    await new Promise<void>((resolve, reject) => {
+    // Subscribe before the repaint so a static tab's only fresh frame cannot be missed.
+    const fresh = new Promise<void>((resolve, reject) => {
       let callback = 0;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const cleanup = () => {
@@ -118,11 +119,24 @@ export async function createScreenCapture(stream: MediaStream, signal: AbortSign
         resolve();
       };
       waitSignal.addEventListener('abort', abort, { once: true });
-      if (video.requestVideoFrameCallback) callback = video.requestVideoFrameCallback(done);
+      const received: VideoFrameRequestCallback = (_now, metadata) => {
+        // A decoded frame can have been captured before the controls were hidden.
+        if (metadata.captureTime !== undefined && metadata.captureTime < requestedAt) {
+          callback = video.requestVideoFrameCallback(received);
+          return;
+        }
+        done();
+      };
+      if (video.requestVideoFrameCallback) callback = video.requestVideoFrameCallback(received);
       // Static/undisplayed video may not be submitted to the compositor again.
-      // Playback still maintains its latest decoded frame for drawImage().
-      timer = setTimeout(done, 200);
+      // Tab capture must await a fresh frame rather than fall back to visible controls.
+      if (
+        !video.requestVideoFrameCallback ||
+        stream.getVideoTracks()[0]?.getSettings().displaySurface !== 'browser'
+      )
+        timer = setTimeout(done, 200);
     });
+    await Promise.all([painted, fresh]);
   }
   return {
     stop,

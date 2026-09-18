@@ -70,10 +70,14 @@ The workflow invokes `vp run --no-cache release`. Publishing must never replay a
 cached result; disabling the task cache also preserves the GitHub OIDC request
 environment and `CHANGESETS_OUTPUT` used to create tags and GitHub releases.
 
-Enable “Allow GitHub Actions to create and approve pull requests” in repository
-Actions settings so Changesets can create version PRs. The action's default token
-is used; release jobs have scoped permissions. Actions are pinned to reviewed
-commit SHAs.
+Version PRs use a dedicated GitHub App installation token so their CI runs start
+automatically. Install the App on this repository with Contents and Pull requests
+read/write permissions. Set the repository variable `CHANGESETS_APP_CLIENT_ID`
+and secret `CHANGESETS_APP_PRIVATE_KEY` to its Client ID and complete PEM private
+key. The version job generates a repository-scoped token and passes it through
+Changesets' `github-token` input; the token is revoked when the job finishes.
+Review and merge the version PR to publish. The publish job retains the default
+GitHub token and npm OIDC authentication. Actions are pinned to reviewed commit SHAs.
 
 ## Validation
 

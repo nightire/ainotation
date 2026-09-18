@@ -178,6 +178,57 @@ it('stops authorization delivered after screenshot cancellation', async () => {
   }
 });
 
+it('waits for a freshly captured tab frame instead of returning a queued frame after 200ms', async () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 80;
+  canvas.height = 40;
+  canvas.getContext('2d')!.fillRect(0, 0, 80, 40);
+  const stream = canvas.captureStream(30);
+  const track = stream.getVideoTracks()[0]!;
+  const settings = track.getSettings();
+  vi.spyOn(track, 'getSettings').mockReturnValue({ ...settings, displaySurface: 'browser' });
+  let receive: VideoFrameRequestCallback | undefined;
+  vi.spyOn(HTMLVideoElement.prototype, 'requestVideoFrameCallback').mockImplementation(
+    (callback) => {
+      receive = callback;
+      return 1;
+    },
+  );
+  vi.spyOn(HTMLVideoElement.prototype, 'cancelVideoFrameCallback').mockImplementation(() => {});
+  vi.stubGlobal('ImageCapture', undefined);
+  const lifetime = new AbortController();
+  let pending: Promise<Blob> | undefined;
+  let finished = false;
+  try {
+    const capture = await createScreenCapture(stream, lifetime.signal);
+    pending = capture.snapshot().then((blob) => {
+      finished = true;
+      return blob;
+    });
+    await vi.waitFor(() => expect(receive).toBeTypeOf('function'), { timeout: 5000 });
+    const metadata = {
+      captureTime: 0,
+      expectedDisplayTime: 0,
+      height: 40,
+      mediaTime: 0,
+      presentationTime: 0,
+      presentedFrames: 1,
+      width: 80,
+    };
+    receive!(performance.now(), metadata);
+    // Exceed the static-video fallback while the tab's fresh frame is still delayed.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(finished).toBe(false);
+    receive!(performance.now(), { ...metadata, captureTime: performance.now() });
+    expect(await describeImage(await pending, 'screen')).toMatchObject({ width: 80, height: 40 });
+  } finally {
+    lifetime.abort();
+    await pending?.catch(() => {});
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
 it.each(['unavailable', 'failed'] as const)(
   'captures a static video frame when ImageCapture is %s and stops the stream on teardown',
   async (mode) => {
