@@ -374,7 +374,8 @@ describe('mounted feedback runtime', () => {
     expect(shell.view.styleEditor.dirty).toBe(true);
     action(shell, { type: 'save' });
     await vi.waitFor(() => expect(shell.view.document!.annotations).toHaveLength(2));
-    await vi.waitFor(() => expect(shell.view.editorOpen).toBe(false));
+    // Closing precedes draft persistence; wait until another save can be accepted.
+    await vi.waitFor(() => expect(shell.view).toMatchObject({ editorOpen: false, saving: false }));
     expect(shell.view.document!.targetStyles).toBeUndefined();
     expect(shell.view.document!.annotations.every((note) => !note.targets[0]!.styleChanges)).toBe(
       true,
