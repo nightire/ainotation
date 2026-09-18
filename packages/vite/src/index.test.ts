@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { createServer, build } from 'vite-plus';
@@ -65,7 +65,10 @@ it('restores deleted service files and images, then resolves a backup rollback t
         .catch(() => ''),
     )
     .toBe(png);
-  await rm(shared.directory, { recursive: true });
+  // Detach the live tree atomically so recovery cannot refill it during recursive deletion.
+  const removedDirectory = `${shared.directory}.deleted`;
+  await rename(shared.directory, removedDirectory);
+  await rm(removedDirectory, { recursive: true });
   await expect
     .poll(
       () =>

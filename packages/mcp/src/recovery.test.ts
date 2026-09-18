@@ -1,5 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile, open } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
@@ -55,7 +55,10 @@ it('recovers a deleted live data directory without starting a competing service'
   });
   expect(response.status).toBe(200);
   await response.body?.cancel();
-  await rm(directory, { recursive: true });
+  // Detach the live tree atomically so recovery cannot refill it during recursive deletion.
+  const removedDirectory = `${directory}.deleted`;
+  await rename(directory, removedDirectory);
+  await rm(removedDirectory, { recursive: true });
   const connections = await Promise.all(
     Array.from({ length: 8 }, () => ensureSharedService({ directory })),
   );
