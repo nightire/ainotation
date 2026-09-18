@@ -1,6 +1,6 @@
 {
   "name": "@ainotation/vite",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.0-beta.2",
   "description": "Automatic Ainotation injection and local MCP pairing for Vite development servers",
   "homepage": "https://github.com/nightire/ainotation#readme",
   "bugs": {
