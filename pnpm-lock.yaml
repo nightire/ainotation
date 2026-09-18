@@ -276,6 +276,9 @@ importers:
       lit:
         specifier: 'catalog:'
         version: 3.3.3
+      lucide:
+        specifier: 'catalog:'
+        version: 1.42.0
     devDependencies:
       '@storybook/web-components-vite':
         specifier: 'catalog:'

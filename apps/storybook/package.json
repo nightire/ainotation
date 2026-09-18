@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@ainotation/sdk": "workspace:*",
-    "lit": "catalog:"
+    "lit": "catalog:",
+    "lucide": "catalog:"
   },
   "devDependencies": {
     "@storybook/web-components-vite": "catalog:",
