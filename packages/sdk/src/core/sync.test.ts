@@ -1,4 +1,8 @@
-import { createFeedbackDocument } from '@ainotation/schema';
+import {
+  createFeedbackDocument,
+  STYLE_SYNC_CAPABILITIES,
+  type FeedbackOperation,
+} from '@ainotation/schema';
 import { afterEach, expect, it, vi } from 'vite-plus/test';
 import { createSyncClient, normalizeConnection } from './sync';
 import { syncImages } from './image-sync';
@@ -8,6 +12,154 @@ import { capturePage } from './selection';
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+it.each(['legacy', 'inline-only', 'clear-shared'] as const)(
+  'retains local suggestions when the %s service cannot preserve shared styles',
+  async (mode) => {
+    const document = createFeedbackDocument(location.href);
+    document.annotations.push({
+      id: crypto.randomUUID(),
+      comment: 'Style',
+      createdAt: document.createdAt,
+      updatedAt: document.createdAt,
+      page: capturePage(),
+      targets: [
+        {
+          id: crypto.randomUUID(),
+          selector: 'body',
+          shadowHosts: [],
+          tagName: 'body',
+          text: '',
+          attributes: {},
+          styles: {},
+          rect: { x: 0, y: 0, width: 10, height: 10 },
+          styleChanges: [{ property: 'padding-top', before: '0px', value: '8px' }],
+        },
+      ],
+      status: 'pending',
+      replies: [],
+    });
+    const downgraded = structuredClone(document);
+    delete downgraded.annotations[0]!.targets[0]!.styleChanges;
+    const operations: FeedbackOperation[] = [];
+    if (mode === 'clear-shared') {
+      delete document.annotations[0]!.targets[0]!.styleChanges;
+      const annotation = structuredClone(document.annotations[0]!);
+      annotation.targets[0]!.styleChanges = [];
+      operations.push({ id: crypto.randomUUID(), kind: 'upsert', annotation });
+    }
+    const fetcher = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (_url, init) =>
+        Response.json(
+          init?.method === 'POST'
+            ? { document: downgraded, acknowledged: operations.map((operation) => operation.id) }
+            : { ok: true, capabilities: mode === 'legacy' ? {} : { styleSuggestions: true } },
+        ),
+      );
+    const apply = vi.fn(async () => {}),
+      states = vi.fn();
+    const client = createSyncClient({
+      connection: { endpoint: 'http://127.0.0.1:4748', token: 'test-token' },
+      sessionId: document.id,
+      read: async () => ({
+        document,
+        operations,
+        draft: { text: '', editingId: null, targets: [] },
+        authority: null,
+      }),
+      apply,
+      onState: states,
+      onSync() {},
+    });
+    try {
+      await client.finished;
+      client.request();
+      await Promise.resolve();
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fetcher.mock.calls[0]![0]).toBe('http://127.0.0.1:4748/health');
+      expect(fetcher.mock.calls[0]![1]?.method ?? 'GET').toBe('GET');
+      expect(apply).not.toHaveBeenCalled();
+      expect(states.mock.calls.at(-1)?.[1]).toMatchObject({ key: 'styleSyncUnsupported' });
+    } finally {
+      client.stop();
+    }
+  },
+);
+
+it('checks capabilities again before writing styles after a service downgrade', async () => {
+  const document = createFeedbackDocument(location.href);
+  const operations: FeedbackOperation[] = [
+    {
+      id: crypto.randomUUID(),
+      kind: 'upsert',
+      styleLinks: { [crypto.randomUUID()]: crypto.randomUUID() },
+      annotation: {
+        id: crypto.randomUUID(),
+        comment: 'Shared link',
+        createdAt: document.createdAt,
+        updatedAt: document.createdAt,
+        page: capturePage(),
+        status: 'pending',
+        replies: [],
+        targets: [
+          {
+            id: crypto.randomUUID(),
+            selector: 'body',
+            shadowHosts: [],
+            tagName: 'body',
+            text: '',
+            attributes: {},
+            styles: {},
+            rect: { x: 0, y: 0, width: 10, height: 10 },
+          },
+        ],
+      },
+    },
+  ];
+  let supported = true;
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    if (url === 'http://127.0.0.1:4748/health')
+      return Response.json({ ok: true, capabilities: supported ? STYLE_SYNC_CAPABILITIES : {} });
+    if (init?.method === 'POST')
+      return Response.json({ document, acknowledged: [], ...STYLE_SYNC_CAPABILITIES });
+    throw new Error('Unexpected request');
+  });
+  const apply = vi.fn(async () => {});
+  const states = vi.fn();
+  const client = createSyncClient({
+    connection: { endpoint: 'http://127.0.0.1:4748', token: 'test-token' },
+    sessionId: document.id,
+    read: async () => ({
+      document,
+      operations,
+      draft: { text: '', editingId: null, targets: [] },
+      authority: null,
+    }),
+    apply,
+    onState: states,
+    onSync() {},
+    once: true,
+  });
+  try {
+    await client.finished;
+    expect(apply).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      'http://127.0.0.1:4748/health',
+      `http://127.0.0.1:4748/sessions/${document.id}/sync`,
+    ]);
+    supported = false;
+    client.request();
+    await vi.waitFor(() =>
+      expect(states.mock.calls.at(-1)?.[1]).toMatchObject({ key: 'styleSyncUnsupported' }),
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(apply).toHaveBeenCalledOnce();
+  } finally {
+    client.stop();
+  }
 });
 
 it.each(['conflict', 'storage-error'] as const)(

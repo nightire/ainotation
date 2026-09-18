@@ -5,6 +5,8 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   AnnotationContentSchema,
   applyFeedbackOperation,
+  normalizeSharedStyles,
+  STYLE_SYNC_CAPABILITIES,
   FeedbackDocumentSchema,
   SyncRequestSchema,
   SyncResponseSchema,
@@ -248,7 +250,7 @@ export class FeedbackStore {
     if (!session || (origin !== undefined && session.origin !== origin)) {
       throw new StoreError(404, 'Session not found');
     }
-    return structuredClone(session.document);
+    return normalizeSharedStyles(session.document);
   }
 
   image(sessionId: string, imageId: string, origin?: string): FeedbackImage {
@@ -338,6 +340,7 @@ export class FeedbackStore {
   }
 
   private async commit(session: Session, preserveImages = false): Promise<void> {
+    session.document = normalizeSharedStyles(session.document);
     validateSession(session);
     await this.checkpoint();
     const previous = this.sessions.get(session.document.id);
@@ -436,6 +439,7 @@ export class FeedbackStore {
         return SyncResponseSchema.parse({
           document: previous.document,
           acknowledged: [],
+          ...STYLE_SYNC_CAPABILITIES,
           storageEpoch: this.storageEpoch,
           recovery: { revision },
         });
@@ -500,6 +504,7 @@ export class FeedbackStore {
       const response = SyncResponseSchema.parse({
         document: session.document,
         acknowledged: request.operations.map((operation) => operation.id),
+        ...STYLE_SYNC_CAPABILITIES,
         storageEpoch: this.storageEpoch,
         missingImages: await this.missingImages(session.document),
       });
@@ -521,10 +526,17 @@ export class FeedbackStore {
         throw new StoreError(409, 'Annotation ID was deleted');
       const existing = document.annotations.find((annotation) => annotation.id === content.id);
       if (existing) {
+        const markerTargets = (targets: typeof content.targets) =>
+          targets.map((target) => {
+            const snapshot = structuredClone(target);
+            delete snapshot.styleChanges;
+            delete snapshot.styleTargetId;
+            return snapshot;
+          });
         if (
           existing.comment !== content.comment ||
           !isDeepStrictEqual(existing.page, content.page) ||
-          !isDeepStrictEqual(existing.targets, content.targets)
+          !isDeepStrictEqual(markerTargets(existing.targets), markerTargets(content.targets))
         ) {
           throw new StoreError(409, 'Annotation ID already exists with different content');
         }
@@ -538,8 +550,9 @@ export class FeedbackStore {
         status: 'pending',
         replies: [],
       });
-      await this.commit({ ...session, document });
-      return structuredClone(document);
+      const shared = normalizeSharedStyles(document, content.targets);
+      await this.commit({ ...session, document: shared });
+      return shared;
     });
   }
 
@@ -564,8 +577,9 @@ export class FeedbackStore {
       annotation.updatedAt = new Date(
         Math.max(Date.now(), Date.parse(before.updatedAt) + 1),
       ).toISOString();
-      await this.commit({ ...this.sessions.get(sessionId)!, document });
-      return structuredClone(document);
+      const shared = normalizeSharedStyles(document, patch.targets ?? []);
+      await this.commit({ ...this.sessions.get(sessionId)!, document: shared });
+      return shared;
     });
   }
 
@@ -581,12 +595,13 @@ export class FeedbackStore {
       if (session.tombstones.length >= MAX_OPERATION_IDS)
         throw new StoreError(409, 'Tombstone capacity reached');
       document.annotations.splice(index, 1);
+      const shared = normalizeSharedStyles(document);
       await this.commit({
         ...session,
-        document,
+        document: shared,
         tombstones: [...session.tombstones, annotationId],
       });
-      return structuredClone(document);
+      return shared;
     });
   }
 

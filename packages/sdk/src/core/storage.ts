@@ -1,4 +1,5 @@
 import type { DBSchema, IDBPDatabase } from 'idb';
+import type { EditorPresentation } from './types';
 import { openDatabase } from './database';
 import {
   applyFeedbackOperation,
@@ -11,6 +12,8 @@ import {
   FeedbackImagesSchema,
   SyncRequestSchema,
   SyncResponseSchema,
+  normalizeSharedStyles,
+  styleTargetKey,
 } from '@ainotation/schema';
 import type {
   FeedbackDocument,
@@ -35,8 +38,13 @@ export interface DraftRecord {
     page?: PageSnapshot;
     images?: FeedbackImage[];
     targetsAdjusted?: boolean;
+    styleTargets?: TargetSnapshot[];
+    editorSessionId?: string;
   };
   images?: Record<string, Blob>;
+  styleDrafts?: TargetSnapshot[];
+  stylePreview?: { enabled: boolean; disabledTargets: string[] };
+  editorViews?: Record<string, EditorPresentation>;
   authority: string | null;
   storageEpoch?: string;
   syncRecovery?: Pick<NonNullable<SyncRequest['recovery']>, 'epoch' | 'revision'> & {
@@ -54,6 +62,23 @@ class InvalidDraftRecordError extends Error {
     super('Stored feedback is invalid or belongs to another page.', { cause });
     this.name = 'InvalidDraftRecordError';
   }
+}
+
+/** Delete local overrides in the same transaction that removes their last saved reference. */
+function pruneRemovedStyleTargets(previous: DraftRecord, next: DraftRecord): DraftRecord {
+  const keys = (document: FeedbackDocument) =>
+    new Set(document.annotations.flatMap((annotation) => annotation.targets.map(styleTargetKey)));
+  const retained = keys(next.document);
+  const removed = new Set([...keys(previous.document)].filter((key) => !retained.has(key)));
+  if (!removed.size) return next;
+  const keep = (target: TargetSnapshot) => !removed.has(styleTargetKey(target));
+  if (next.styleDrafts) next.styleDrafts = next.styleDrafts.filter(keep);
+  if (next.draft.styleTargets) next.draft.styleTargets = next.draft.styleTargets.filter(keep);
+  if (next.stylePreview)
+    next.stylePreview.disabledTargets = next.stylePreview.disabledTargets.filter(
+      (id) => !removed.has(id),
+    );
+  return next;
 }
 
 export async function createDraftStore(options: {
@@ -111,7 +136,7 @@ export async function createDraftStore(options: {
       )
         throw new Error('Invalid draft envelope');
       const value = input as DraftRecord;
-      const document = FeedbackDocumentSchema.parse(value.document);
+      const document = normalizeSharedStyles(FeedbackDocumentSchema.parse(value.document));
       if (url !== undefined && document.url !== url) throw new Error('Stored page mismatch');
       const draftImages = FeedbackImagesSchema.parse(value.draft.images ?? []);
       const referenced = new Set(
@@ -125,8 +150,70 @@ export async function createDraftStore(options: {
           ([id, blob]) => referenced.has(id) && blob instanceof Blob,
         ),
       );
+      const editorViews: Record<string, EditorPresentation> = {};
+      for (const [id, presentation] of Object.entries(value.editorViews ?? {}).slice(-1001)) {
+        if (
+          !TargetSnapshotSchema.shape.id.safeParse(id).success ||
+          !presentation ||
+          typeof presentation !== 'object'
+        )
+          continue;
+        const targets = TargetSnapshotSchema.shape.id
+          .array()
+          .max(20)
+          .safeParse(presentation.targets);
+        if (!targets.success) continue;
+        const position = MarkerAnchorSchema.pick({ x: true, y: true }).safeParse(
+          presentation.position,
+        );
+        editorViews[id] = {
+          tab: presentation.tab === 'styles' ? 'styles' : 'feedback',
+          targets: targets.data,
+          position: position.success ? position.data : null,
+        };
+        const navigation = presentation.navigation;
+        if (
+          navigation &&
+          Array.isArray(navigation.slots) &&
+          navigation.slots.length > 0 &&
+          navigation.slots.length <= 20
+        ) {
+          const references = TargetSnapshotSchema.shape.id
+            .array()
+            .max(20)
+            .safeParse(navigation.referenceIds);
+          const slots = navigation.slots.map((slot) => {
+            const target = TargetSnapshotSchema.safeParse(slot?.target);
+            const history = TargetSnapshotSchema.array().max(64).safeParse(slot?.history);
+            if (!target.success || !history.success) return null;
+            const path = [...history.data, target.data].map((entry) => entry.id);
+            if (new Set(path).size !== path.length) return null;
+            return { target: target.data, history: history.data };
+          });
+          if (
+            references.success &&
+            slots.every((slot) => slot !== null) &&
+            new Set(slots.map((slot) => slot.target.id)).size === slots.length
+          )
+            editorViews[id]!.navigation = { slots, referenceIds: references.data };
+        }
+      }
       return {
         images,
+        ...(Object.keys(editorViews).length ? { editorViews } : {}),
+        ...(value.styleDrafts
+          ? { styleDrafts: TargetSnapshotSchema.array().max(20000).parse(value.styleDrafts) }
+          : {}),
+        ...(value.stylePreview
+          ? {
+              stylePreview: {
+                enabled: value.stylePreview.enabled === true,
+                disabledTargets: value.stylePreview.disabledTargets
+                  .filter((id) => typeof id === 'string')
+                  .slice(0, 20000),
+              },
+            }
+          : {}),
         ...(typeof value.multipleSelection === 'boolean'
           ? { multipleSelection: value.multipleSelection }
           : {}),
@@ -162,8 +249,14 @@ export async function createDraftStore(options: {
         draft: {
           text: typeof value.draft.text === 'string' ? value.draft.text.slice(0, 10000) : '',
           editingId: typeof value.draft.editingId === 'string' ? value.draft.editingId : null,
+          ...(TargetSnapshotSchema.shape.id.safeParse(value.draft.editorSessionId).success
+            ? { editorSessionId: value.draft.editorSessionId! }
+            : {}),
           ...(value.draft.targetsAdjusted ? { targetsAdjusted: true } : {}),
           targets: TargetSnapshotSchema.array().max(20).parse(value.draft.targets),
+          ...(value.draft.styleTargets
+            ? { styleTargets: TargetSnapshotSchema.array().max(20).parse(value.draft.styleTargets) }
+            : {}),
           ...(draftImages.length ? { images: draftImages } : {}),
           ...(value.draft.marker ? { marker: MarkerAnchorSchema.parse(value.draft.marker) } : {}),
           ...(value.draft.page ? { page: PageSnapshotSchema.parse(value.draft.page) } : {}),
@@ -184,6 +277,8 @@ export async function createDraftStore(options: {
     change: (record: DraftRecord) => DraftRecord,
   ): Promise<DraftRecord> {
     if (closed) return Promise.reject(new Error('Storage closed'));
+    const transition = (previous: DraftRecord) =>
+      pruneRemovedStyleTargets(previous, parse(change(structuredClone(previous)), url));
     const work = queue.then(async () => {
       let previous = memory.get(key) ?? initial(url);
       let next: DraftRecord | undefined;
@@ -195,7 +290,7 @@ export async function createDraftStore(options: {
             const saved = await transaction.store.get(key);
             previous = saved ? parse(saved, url) : previous;
             reducing = true;
-            next = parse(change(structuredClone(previous)), url);
+            next = transition(previous);
             reducing = false;
             await transaction.store.put(next, key);
             await transaction.done;
@@ -223,7 +318,7 @@ export async function createDraftStore(options: {
         }
       }
       if (previous.document.url !== url) throw new InvalidDraftRecordError('Stored page mismatch');
-      next ??= parse(change(structuredClone(previous)), url);
+      next ??= transition(previous);
       memory.set(key, next);
       return structuredClone(next);
     });
@@ -334,6 +429,7 @@ export async function createDraftStore(options: {
             draft.marker,
             draft.page,
             draft.images ?? [],
+            draft.styleTargets ?? [],
           ]);
         const clearDraft = submittedDraft && identity(record.draft) === identity(submittedDraft);
         return {
@@ -421,6 +517,9 @@ export async function createDraftStore(options: {
         document: operations.reduce(applyFeedbackOperation, record.document),
         operations: [...record.operations, ...operations],
         draft: { text: '', editingId: null, targets: [], editorOpen: false },
+        styleDrafts: [],
+        stylePreview: { enabled: record.stylePreview?.enabled ?? true, disabledTargets: [] },
+        editorViews: {},
       }));
     },
     close() {

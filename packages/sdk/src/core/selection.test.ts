@@ -583,6 +583,65 @@ describe('selection in a real browser', () => {
     expect(selection.targetNavigation(child.id).parent).toBe(false);
   });
 
+  it('restores recorded navigation without treating explicit nested selections as one chain', async () => {
+    const { selection, fixture, createSelection } = await setup();
+    fixture.innerHTML =
+      '<section id="nav-wrapper"><button id="nav-child">Child</button></section><button id="nav-other">Other</button>';
+    const wrapper = fixture.querySelector('#nav-wrapper')!,
+      child = fixture.querySelector('#nav-child')!,
+      other = fixture.querySelector('#nav-other')!;
+    selection.select(child);
+    selection.select(other, true);
+    const [first, second] = selection.getTargets();
+    selection.navigateTarget(first!.id, 'parent');
+    const slots = JSON.parse(JSON.stringify(selection.getNavigation()));
+    const restored = createSelection({ onChange: vi.fn() });
+    selections.push(restored);
+    restored.restoreNavigation(slots);
+    const parent = restored.getTargets()[0]!;
+    expect(restored.getTargets().map((target) => target.id)).toEqual([parent.id, second!.id]);
+    expect(restored.targetNavigation(parent.id).back).toBe(true);
+    expect(restored.navigateTarget(parent.id, 'back')).toBe(true);
+    expect(restored.getTargets()[0]!.id).toBe(first!.id);
+    restored.navigateTarget(first!.id, 'parent');
+    child.replaceWith(child.cloneNode(true));
+    restored.restoreNavigation(slots);
+    expect(restored.targetNavigation(parent.id).back).toBe(false);
+    const explicit = createSelection({ onChange: vi.fn() });
+    selections.push(explicit);
+    explicit.select(wrapper);
+    explicit.select(wrapper.firstElementChild!, true);
+    const parallel = explicit.getNavigation();
+    expect(parallel).toHaveLength(2);
+    expect(parallel.every((slot) => slot.history.length === 0)).toBe(true);
+    explicit.restoreNavigation(JSON.parse(JSON.stringify(parallel)));
+    expect(explicit.getTargets()).toHaveLength(2);
+    expect(explicit.targetNavigation(parallel[0]!.target.id).back).toBe(false);
+    expect(explicit.targetNavigation(parallel[1]!.target.id).parent).toBe(false);
+  });
+
+  it('disables a restored return path when the child no longer belongs to the recorded parent', async () => {
+    const { selection, fixture, createSelection } = await setup();
+    fixture.innerHTML =
+      '<div id="first-parent"><button id="moved-child">Child</button></div><div id="second-parent"></div>';
+    const child = fixture.querySelector('button')!;
+    selection.select(child);
+    const id = selection.getTargets()[0]!.id;
+    selection.navigateTarget(id, 'parent');
+    const slots = selection.getNavigation();
+    const restored = createSelection({ onChange: vi.fn() });
+    selections.push(restored);
+    restored.restoreNavigation(slots);
+    expect(restored.targetNavigation(slots[0]!.target.id).back).toBe(true);
+    restored.restoreNavigation(slots.map((slot) => ({ target: slot.target, history: [] })));
+    expect(restored.targetNavigation(slots[0]!.target.id).back).toBe(false);
+    restored.restoreNavigation(slots);
+    expect(restored.targetNavigation(slots[0]!.target.id).back).toBe(true);
+    fixture.querySelector('#second-parent')!.append(child);
+    expect(restored.targetNavigation(slots[0]!.target.id).back).toBe(false);
+    expect(restored.navigateTarget(slots[0]!.target.id, 'back')).toBe(false);
+  });
+
   it('rejects changed image identity on restoration and still reads legacy snapshots', async () => {
     const { selection, fixture, createSelection } = await setup();
     fixture.innerHTML = '<img class="identity-logo" src="/logo.svg" alt="Brand">';

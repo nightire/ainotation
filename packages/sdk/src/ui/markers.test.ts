@@ -44,6 +44,61 @@ const second: Annotation = {
 };
 const cleanup: (() => void)[] = [];
 
+it('drags blank panel space without activating a button on release and releases lost captures', () => {
+  const { root, onAction } = mount({
+    editorOpen: true,
+    marker: { x: 100, y: 100, space: 'viewport' },
+    draft: 'Keep this feedback',
+  });
+  const panel = root.querySelector<HTMLElement>('.popover')!;
+  expect(root.querySelector('[data-action="panel-drag"], [data-action="close-edit"]')).toBeNull();
+  vi.spyOn(panel, 'setPointerCapture').mockImplementation(() => {});
+  vi.spyOn(panel, 'hasPointerCapture').mockReturnValue(false);
+  const rect = panel.getBoundingClientRect();
+  const pointer = (type: string, x: number, y: number) => {
+    panel.dispatchEvent(
+      new PointerEvent(type, {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+        isPrimary: true,
+        pointerType: 'mouse',
+        pointerId: 42,
+        button: 0,
+        buttons: type === 'pointerup' ? 0 : 1,
+        clientX: x,
+        clientY: y,
+      }),
+    );
+  };
+  pointer('pointerdown', rect.x + 5, rect.y + 5);
+  pointer('pointermove', rect.x + 25, rect.y + 25);
+  expect(panel.classList.contains('dragging')).toBe(true);
+  pointer('pointerup', rect.x + 25, rect.y + 25);
+  expect(panel.classList.contains('dragging')).toBe(false);
+  expect(onAction).toHaveBeenCalledOnce();
+  expect(onAction.mock.calls[0]![0].type).toBe('editor-position');
+  const click = new MouseEvent('click', {
+    bubbles: true,
+    composed: true,
+    cancelable: true,
+    detail: 1,
+    clientX: rect.x + 25,
+    clientY: rect.y + 25,
+  });
+  root.querySelector<HTMLButtonElement>('[data-action="save"]')!.dispatchEvent(click);
+  expect(click.defaultPrevented).toBe(true);
+  expect(onAction).toHaveBeenCalledOnce();
+  const moved = panel.getBoundingClientRect();
+  pointer('pointerdown', moved.x + 5, moved.y + 5);
+  pointer('pointermove', moved.x + 15, moved.y + 15);
+  pointer('lostpointercapture', moved.x + 15, moved.y + 15);
+  const position = panel.style.cssText;
+  pointer('pointermove', moved.x + 45, moved.y + 45);
+  expect(panel.style.cssText).toBe(position);
+  expect(panel.classList.contains('dragging')).toBe(false);
+});
+
 it('accepts image paste and drop inside the feedback popover while preserving ordinary text paste', () => {
   const { root, onAction } = mount({
     editorOpen: true,

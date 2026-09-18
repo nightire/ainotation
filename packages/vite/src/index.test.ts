@@ -222,7 +222,9 @@ it('automatically mounts and syncs two projects to their scoped MCP clients with
     const editor = page.locator('[data-ainotation-ui="markers"]').getByRole('dialog');
     const input = editor.getByRole('textbox', { name: 'Feedback content', exact: true });
     await input.fill(`${app.project.config.name} feedback`);
-    await input.press('Meta+Enter');
+    await editor.getByRole('tab', { name: 'Styles', exact: true }).click();
+    await editor.getByRole('textbox', { name: 'Padding', exact: true }).fill('16px');
+    await editor.getByRole('button', { name: 'Add', exact: true }).click();
     await editor.waitFor({ state: 'detached' });
     const bridge = createProjectMcpServer({
       directory: app.directory,
@@ -239,7 +241,10 @@ it('automatically mounts and syncs two projects to their scoped MCP clients with
       expect(result.isError).not.toBe(true);
       return JSON.parse((result.content as { text: string }[])[0]!.text) as {
         id: string;
-        annotations: { comment: string }[];
+        annotations: {
+          comment: string;
+          targets: { styleChanges?: { property: string; value: string }[] }[];
+        }[];
       }[];
     };
     await expect
@@ -250,6 +255,13 @@ it('automatically mounts and syncs two projects to their scoped MCP clients with
       )
       .toEqual([`${app.project.config.name} feedback`]);
     const saved = await sessions();
+    expect(saved[0]!.annotations[0]!.targets[0]!.styleChanges).toHaveLength(4);
+    expect(
+      saved[0]!.annotations[0]!.targets[0]!.styleChanges!.every(
+        (change) => change.value === '16px',
+      ),
+    ).toBe(true);
+    expect(requests.some((request) => request.endsWith('/api/health: 200'))).toBe(true);
     savedIds.push(saved[0]!.id);
     if (savedIds.length === 2)
       expect(

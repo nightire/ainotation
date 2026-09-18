@@ -95,7 +95,9 @@ export function createDevelopmentBridge(options: {
           return;
         }
         const route =
-          /^\/api(\/sessions\/[a-f0-9-]{36}\/(sync|events|images\/[a-f0-9-]{36}))$/i.exec(suffix);
+          /^\/api(\/health|\/sessions\/[a-f0-9-]{36}\/(sync|events|images\/[a-f0-9-]{36}))$/i.exec(
+            suffix,
+          );
         const image = route?.[2]?.startsWith('images/');
         if (
           !route ||

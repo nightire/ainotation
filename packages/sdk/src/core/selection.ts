@@ -1,4 +1,5 @@
 import type { MarkerAnchor, PageSnapshot, TargetSnapshot } from '@ainotation/schema';
+import type { SelectionNavigationSlot } from './types';
 import { parentElement, excludedElement, hitTest } from './dom';
 import { createDomObserver } from './dom-observer';
 import { captureAttributes, captureDomContext } from './dom-context';
@@ -16,6 +17,8 @@ type Options = {
   onSelect?: (anchor: MarkerAnchor, targets: TargetSnapshot[]) => void;
   onBatchChange?: (active: boolean) => void;
   onCancel?: () => void;
+  onOutsideClick?: () => boolean;
+  capture?: <T>(read: () => T) => T;
 };
 
 const fingerprintAttributes = ['id', 'data-testid', 'aria-label', 'role'];
@@ -249,6 +252,9 @@ export function createSelection(options: Options) {
   }
 
   function getTargets(): TargetSnapshot[] {
+    return options.capture ? options.capture(readTargets) : readTargets();
+  }
+  function readTargets(): TargetSnapshot[] {
     targets = targets.map((target) => {
       const { element } = resolve(target);
       return element ? { ...target, ...geometry(element) } : target;
@@ -357,6 +363,9 @@ export function createSelection(options: Options) {
   }
 
   function snapshot(element: Element): TargetSnapshot {
+    return options.capture ? options.capture(() => readSnapshot(element)) : readSnapshot(element);
+  }
+  function readSnapshot(element: Element): TargetSnapshot {
     let root = element.getRootNode();
     if (!(root instanceof Document || root instanceof ShadowRoot))
       throw new Error('Target must be connected to the document.');
@@ -550,6 +559,7 @@ export function createSelection(options: Options) {
     additive: boolean,
     textSelection?: TargetSnapshot['textSelection'],
   ) {
+    if (!additive && !textSelection && options.onOutsideClick?.()) return;
     ancestryHistory.clear();
     pointerPosition = point;
     if (additive) {
@@ -842,6 +852,7 @@ export function createSelection(options: Options) {
   function navigationCandidate(id: string, direction: 'parent' | 'back') {
     const target = targets.find((target) => target.id === id);
     if (!target) return;
+    if (direction === 'parent' && (ancestryHistory.get(id)?.length ?? 0) >= 64) return;
     const current = resolve(target).element;
     if (!current || !usable(current)) return;
     const previous = ancestryHistory.get(id)?.at(-1);
@@ -859,19 +870,45 @@ export function createSelection(options: Options) {
   }
 
   return {
+    getNavigation(): SelectionNavigationSlot[] {
+      return targets.map((target) => ({
+        target: structuredClone(target),
+        history: structuredClone(ancestryHistory.get(target.id) ?? []),
+      }));
+    },
+    restoreNavigation(slots: SelectionNavigationSlot[]) {
+      if (destroyed) return;
+      checkLimit(slots.length);
+      endBatch(false);
+      clearTextRange();
+      ancestryHistory.clear();
+      targets = slots.map((slot) => structuredClone(slot.target));
+      for (const slot of slots) {
+        const history = structuredClone(slot.history.slice(-64));
+        ancestryHistory.set(slot.target.id, history);
+        for (const target of history) availability(target);
+      }
+      changed();
+    },
     targetNavigation(id: string) {
       return {
         parent: !!navigationCandidate(id, 'parent'),
         back: !!navigationCandidate(id, 'back'),
       };
     },
-    navigateTarget(id: string, direction: 'parent' | 'back') {
+    navigateTarget(
+      id: string,
+      direction: 'parent' | 'back',
+      accept: (targets: TargetSnapshot[]) => boolean = () => true,
+    ) {
       const found = navigationCandidate(id, direction);
       if (!found) return false;
       const index = targets.findIndex((target) => target.id === id);
       const history = ancestryHistory.get(id) ?? [];
       const replacement =
         direction === 'parent' ? snapshot(found.candidate) : structuredClone(found.previous!);
+      if (!accept(targets.map((target, slot) => (slot === index ? replacement : target))))
+        return false;
       const nextHistory =
         direction === 'parent'
           ? [...history, structuredClone(targets[index]!)]
@@ -911,6 +948,7 @@ export function createSelection(options: Options) {
     clear,
     getTargets,
     getRect,
+    getElement: (target: TargetSnapshot) => resolve(target).element ?? null,
     availability,
     // Focusing an annotation intentionally replaces the editable selection.
     focus: setTargets,

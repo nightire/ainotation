@@ -131,7 +131,8 @@ it('roundtrips CRUD through the real client with idempotent retries and tombston
   const changed = vi.fn();
   store.subscribe(document.id, changed);
   const { call, client } = await connect(store);
-  const source = document.annotations[0]!;
+  const source = structuredClone(document.annotations[0]!);
+  source.targets[0]!.styleChanges = [{ property: 'padding-top', before: '8px', value: '16px' }];
   const pair = { sessionId: document.id, annotationId: randomUUID() };
   const input = { ...pair, comment: 'Created by MCP', page: source.page, targets: source.targets };
   const created = await call('ainotation_create_annotation', input);
@@ -144,6 +145,7 @@ it('roundtrips CRUD through the real client with idempotent retries and tombston
     replies: [],
   });
   expect(annotation.createdAt).toBe(annotation.updatedAt);
+  expect(annotation.targets[0]!.styleChanges).toEqual(source.targets[0]!.styleChanges);
   expect(await call('ainotation_get_annotation', pair)).toEqual(
     AnnotationContentSchema.parse(annotation),
   );
@@ -174,6 +176,8 @@ it('roundtrips CRUD through the real client with idempotent retries and tombston
   expect(changed).toHaveBeenCalledTimes(2);
 
   const deleted = await call('ainotation_delete_annotation', pair);
+  // The original marker still references this target's shared styles.
+  document.annotations[0]!.targets[0]!.styleChanges = source.targets[0]!.styleChanges;
   expect(deleted).toEqual(feedbackExport(document));
   expect(await call('ainotation_delete_annotation', pair)).toEqual(deleted);
   for (const [name, args] of [
@@ -276,4 +280,47 @@ it('rejects hidden fields, empty patches, invalid context and cross-session anno
   }
   expect(store.get(document.id)).toEqual(document);
   expect(store.get(other.id)).toEqual(other);
+});
+
+it('shares canonical styles across MCP marker aliases and keeps retries independent of shared revisions', async () => {
+  const store = await createFeedbackStore();
+  const document = fixture();
+  await store.sync(document.id, { document, operations: [] }, origin);
+  const { call } = await connect(store);
+  const first = document.annotations[0]!,
+    target = first.targets[0]!;
+  const pair = { sessionId: document.id, annotationId: randomUUID() };
+  const second = {
+    ...target,
+    id: randomUUID(),
+    styleTargetId: target.id,
+    styleChanges: [{ property: 'padding-top' as const, before: '8px', value: '12px' }],
+  };
+  const input = { ...pair, comment: 'Second marker', page: first.page, targets: [second] };
+  await call('ainotation_create_annotation', input);
+  expect(store.get(document.id).annotations[0]!.targets[0]!.styleChanges?.[0]?.value).toBe('12px');
+  await call('ainotation_update_annotation', {
+    sessionId: document.id,
+    annotationId: first.id,
+    patch: {
+      targets: [
+        { ...target, styleChanges: [{ property: 'padding-top', before: '8px', value: '20px' }] },
+      ],
+    },
+  });
+  const shared = store.get(document.id);
+  expect(Object.keys(shared.targetStyles!)).toEqual([target.id]);
+  expect(shared.annotations.map((note) => note.targets[0]!.styleChanges?.[0]?.value)).toEqual([
+    '20px',
+    '20px',
+  ]);
+  expect(await call('ainotation_create_annotation', input)).toEqual(feedbackExport(shared));
+  await call('ainotation_update_annotation', {
+    ...pair,
+    patch: { targets: [{ ...second, styleChanges: [] }] },
+  });
+  expect(store.get(document.id).targetStyles).toBeUndefined();
+  expect(store.get(document.id).annotations.every((note) => !note.targets[0]!.styleChanges)).toBe(
+    true,
+  );
 });

@@ -42,6 +42,19 @@ it('renews a dev-server lease, isolates proxy routes and revokes it on close', a
   await connection.connect();
   const initial = (await grants())[0]!;
   expect(initial.kind).toBe('browser');
+  const health = await connection.fetch('/health', {
+    method: 'GET',
+    signal: new AbortController().signal,
+  });
+  expect(await health.json()).toMatchObject({
+    capabilities: { styleSuggestions: true, sharedStyles: true },
+  });
+  await expect(
+    connection.fetch('/health', {
+      method: 'POST',
+      signal: new AbortController().signal,
+    }),
+  ).rejects.toThrow('Invalid browser proxy path');
   await vi.waitFor(
     async () => expect((await grants())[0]!.expiresAt).toBeGreaterThan(initial.expiresAt),
     { timeout: 2500 },

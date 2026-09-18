@@ -217,6 +217,9 @@ it('requires control authorization, exact Host/Origin and bounded JSON with no c
   const browser = await grant(first.projectId, 'browser');
   expect((await request('/control/projects', browser.token)).status).toBe(401);
   expect(
+    await (await request('/health', browser.token, { headers: { Origin: origin } })).json(),
+  ).toMatchObject({ capabilities: { styleSuggestions: true, sharedStyles: true } });
+  expect(
     (
       await request('/control/grants', service.connection.token, {
         ...json({ kind: 'agent', projectId: first.projectId }),

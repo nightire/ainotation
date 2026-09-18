@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer, type ServerResponse } from 'node:http';
-import { SyncRequestSchema } from '@ainotation/schema';
+import { SyncRequestSchema, STYLE_SYNC_CAPABILITIES } from '@ainotation/schema';
 import { z } from 'zod';
 import { FeedbackStore, StoreError } from './store';
 import { readJson, isExactOrigin, sendError } from './http-common';
@@ -65,7 +65,7 @@ export async function startHttpServer(options: {
       if (!timingSafeEqual(tokenHash, suppliedHash)) throw new StoreError(401, 'Unauthorized');
       // Exact paths also prevent tokens or other credentials from being accepted in URLs.
       if (request.method === 'GET' && request.url === '/health') {
-        json(200, { ok: true });
+        json(200, { ok: true, capabilities: STYLE_SYNC_CAPABILITIES });
         return;
       }
       if (await imageHttp(request, response, async () => ({ store, origin }))) return;

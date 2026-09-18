@@ -9,7 +9,7 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
-async function setup(upstream: Response) {
+async function setup(upstream: Response, healthMethod?: 'GET' | 'POST') {
   const connection = {
     connect: vi.fn(async () => {}),
     fetch: vi.fn(async () => upstream),
@@ -46,6 +46,11 @@ async function setup(upstream: Response) {
     headers: { Origin: origin, 'X-Ainotation-Client': '1' },
   });
   const { endpoint, token } = (await bootstrap.json()) as { endpoint: string; token: string };
+  if (healthMethod)
+    return fetch(`${endpoint}/health`, {
+      method: healthMethod,
+      headers: { Origin: origin, Authorization: `Bearer ${token}` },
+    });
   const document = createFeedbackDocument(`${origin}/`);
   return fetch(`${endpoint}/sessions/${document.id}/sync`, {
     method: 'POST',
@@ -57,6 +62,14 @@ async function setup(upstream: Response) {
     body: JSON.stringify({ document, operations: [] }),
   });
 }
+
+it('proxies a read-only capability probe through the authenticated development connection', async () => {
+  const health = { ok: true, capabilities: { styleSuggestions: true, sharedStyles: true } };
+  const response = await setup(Response.json(health), 'GET');
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(health);
+  expect((await setup(Response.json(health), 'POST')).status).toBe(404);
+});
 
 it.each([
   'recovery-stale',

@@ -12,6 +12,7 @@ Select an element, describe what should change, and give your coding agent the c
 ## Features
 
 - **Feedback in context.** Annotate elements or text selections with selectors, styles, geometry and surrounding DOM information.
+- **Try a style change.** Adjust common CSS properties on the real page, then save the original and desired values with your feedback.
 - **Draw on the page.** Add arrows, shapes and freehand strokes, select multiple shapes, and crop screenshots. Import images by pasting, dropping or choosing a file.
 - **Work with AI agents.** Read and edit saved feedback through a local MCP service, including image attachments on demand.
 - **Keep working locally.** Drafts and annotations survive reloads. Copy Markdown or export feedback without an MCP connection. No account or cloud service required.
@@ -52,6 +53,68 @@ For Vite+, import `defineConfig` from `vite-plus` instead.
 Run your app's usual development command and open it in the browser. Click the floating **A** button, select an element, and write your first feedback.
 
 The plugin handles injection and local pairing automatically. It is active only during development and does not inject Ainotation into production builds.
+
+## Style suggestions
+
+The annotation popover has **Feedback** and **Styles** tabs. Text and image actions
+stay in Feedback; Styles groups size/spacing, typography, appearance and layout.
+Focus a numeric field and scroll inside it (or use arrow keys) to adjust it;
+Shift uses a 10× step. Click a modified field's yellow dot to restore it.
+Padding and Margin have separate controls: each starts with one all-sides input,
+with buttons to expand horizontal/vertical pairs or four individual sides. The
+all-sides input remains available when expanded; click the active mode button
+again to collapse. Switching modes never changes values. Grouped inputs display
+mixed values, step each affected side relatively, and restore each side's original
+value as one undoable operation. Undo/redo and preview support quick comparisons. Drag a
+non-interactive blank area of the popover to move it without moving the annotation
+marker. Inputs, selects, buttons, expandable headings and copyable locator text
+keep their native interaction. You can also focus the panel and use arrow keys.
+Each marker remembers its last tab, dragged position and editing scope, including
+after a reload. Its local editor context also retains each selection item's
+parent-navigation return path. Saving a child and its parent's style changes
+does not turn that navigation path into two parallel selections on reopen;
+explicit Shift selections stay separate. Paths are validated against live DOM
+identity and parent relationships before navigating. Older annotations without
+recorded navigation retain their target list; nesting alone never infers a path.
+Parent/child navigation follows the affected member of that scope
+without silently switching to all associated targets. With an editor open, an
+ordinary click on the page first closes it and keeps the draft; another click can
+select a new target. Shift selection and Option/Alt interaction remain available.
+
+The toolbar's **Preview all changes** switch controls the entire current page and
+starts on. Saving, closing an editor or collapsing the inspector keeps the full
+preview visible. The local switch affects only the editor's selected targets;
+global off restores the page and disables local switches. Global on restores the
+previous local choices. Cancelling discards that editing scope's unsaved style
+changes and restores its committed suggestions, without changing other targets.
+
+Multiple markers on the same element edit one shared style record. Text and images
+remain independent per marker. A Shift-selected marker edits all its targets by
+default: differing values display **Mixed**, direct input sets a common value,
+and wheel/arrow adjustments increment each target's own value. A batch is one undo
+step; resetting restores each target's original value. You can narrow the editor
+to one target. Missing targets prevent partial batch edits.
+
+Shared original/desired declarations live in `document.targetStyles`. Targets
+reference them by ID (or `styleTargetId` for verified aliases); inline
+`styleChanges` are derived compatibility projections. Captured snapshots stay
+unchanged. Shared drafts and preview preferences are isolated by project and full
+page URL. Markdown emits each shared style once with references, and JSON/ZIP and
+MCP retain both the shared records and expanded target context. Deleting a marker
+keeps styles used by other markers; deleting the last reference removes them.
+
+Preview overrides are always removed on navigation and unmount. Changed host
+styles require confirmation and missing or replaced targets are never silently
+rebound. Host writes are preserved when removing overrides. Suggestions describe
+the desired result at the captured viewport; they do not require inline CSS in
+the implementation. An annotation may include up to 20 targets.
+Targets initially hidden or not yet mounted are retried when their DOM becomes
+available. Restoration still validates identity; a previously bound node is never
+silently replaced by a lookalike with the same selector.
+
+Update and restart older MCP services before syncing style suggestions. The SDK
+pauses incompatible sync and retains local feedback instead of accepting a
+response that cannot preserve these fields.
 
 ## Connect your coding agent
 

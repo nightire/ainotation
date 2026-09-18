@@ -137,6 +137,543 @@ afterEach(async () => {
 });
 
 describe('mounted feedback runtime', () => {
+  it('clears persisted style drafts so remount cannot resurrect a cleared preview', async () => {
+    const { instance, shell, buttons, read, projectId } = await setup({ mcp: false });
+    buttons[0]!.style.padding = '8px';
+    select(buttons[0]!);
+    await save(shell, 'Clear this marker');
+    action(shell, { type: 'edit', id: shell.view.document!.annotations[0]!.id });
+    action(shell, { type: 'style-change', property: 'padding-top', value: '24px', linked: false });
+    await vi.waitFor(async () => expect((await read())?.styleDrafts).toHaveLength(1));
+    action(shell, { type: 'clear-all' });
+    await vi.waitFor(() => expect(shell.view.message).toBe('All annotations on this page cleared'));
+    expect(buttons[0]!.style.paddingTop).toBe('8px');
+    instance.destroy();
+    const restored = createAinotation({ projectId, mcp: false });
+    instances.push(restored);
+    await restored.mount();
+    const next = document.querySelector('ainotation-inspector-shell')!;
+    await vi.waitFor(() => expect(next.view.storage).toBe('ready'));
+    expect(next.view.document!.annotations).toEqual([]);
+    expect(next.view.styleEditor.globalCount).toBe(0);
+    expect(buttons[0]!.style.paddingTop).toBe('8px');
+  });
+
+  it('allows navigation among retained targets at the limit while rejecting a twenty-first target', async () => {
+    const { shell, buttons, fixture } = await setup({ mcp: false });
+    let parent: HTMLElement = fixture;
+    for (let index = 0; index < 20; index++) {
+      const wrapper = document.createElement('section');
+      wrapper.id = `navigation-limit-${index}`;
+      wrapper.style.padding = '1px';
+      parent.append(wrapper);
+      parent = wrapper;
+    }
+    parent.append(buttons[0]!);
+    buttons[0]!.style.padding = '8px';
+    select(buttons[0]!);
+    const ids: string[] = [];
+    for (let index = 0; index < 20; index++) {
+      const id = shell.view.selected[0]!.id;
+      ids.push(id);
+      action(shell, {
+        type: 'style-change',
+        property: 'padding-top',
+        value: '16px',
+        linked: false,
+      });
+      if (index < 19) action(shell, { type: 'navigate-target', id, direction: 'parent' });
+    }
+    expect(shell.view.styleEditor.count).toBe(20);
+    action(shell, { type: 'navigate-target', id: ids[19]!, direction: 'parent' });
+    expect(shell.view.selected[0]!.id).toBe(ids[19]);
+    action(shell, { type: 'navigate-target', id: ids[19]!, direction: 'back' });
+    expect(shell.view.selected[0]!.id).toBe(ids[18]);
+    action(shell, { type: 'navigate-target', id: ids[18]!, direction: 'parent' });
+    expect(shell.view.selected[0]!.id).toBe(ids[19]);
+    await save(shell, 'Twenty retained targets');
+    expect(shell.view.document!.annotations[0]!.targets).toHaveLength(20);
+  });
+
+  it.each(['legacy', 'invalid', 'changed-targets'] as const)(
+    'falls back to the full target list for %s navigation metadata',
+    async (kind) => {
+      const { instance, shell, buttons, read, projectId } = await setup({ mcp: false });
+      select(buttons[0]!);
+      const child = shell.view.selected[0]!;
+      action(shell, {
+        type: 'style-change',
+        property: 'padding-top',
+        value: '16px',
+        linked: false,
+      });
+      action(shell, { type: 'navigate-target', id: child.id, direction: 'parent' });
+      await save(shell, 'Navigation fallback');
+      const note = shell.view.document!.annotations[0]!;
+      await vi.waitFor(async () =>
+        expect((await read())?.editorViews?.[note.id]?.navigation).toBeDefined(),
+      );
+      instance.destroy();
+      const database = databases.at(-1)!;
+      const record = (await database.db.get('pages', database.pageKeys[0]!)) as DraftRecord;
+      const presentation = record.editorViews![note.id]!;
+      if (kind === 'legacy') delete presentation.navigation;
+      else if (kind === 'invalid')
+        presentation.navigation!.slots[0]!.history = [presentation.navigation!.slots[0]!.target];
+      else
+        record.document.annotations[0]!.targets = record.document.annotations[0]!.targets.filter(
+          (target) => target.id !== child.id,
+        );
+      await database.db.put('pages', record, database.pageKeys[0]!);
+      const restored = createAinotation({ projectId, mcp: false });
+      instances.push(restored);
+      await restored.mount();
+      const next = document.querySelector('ainotation-inspector-shell')!;
+      await vi.waitFor(() => expect(next.view.storage).toBe('ready'));
+      action(next, { type: 'edit', id: note.id });
+      expect(next.view.selected.map((target) => target.id)).toEqual(
+        record.document.annotations[0]!.targets.map((target) => target.id),
+      );
+      expect(Object.values(next.view.targetNavigation).every((value) => !value.back)).toBe(true);
+    },
+  );
+  it('remembers a saved marker tab, dragged position and single-target scope across reopen and remount', async () => {
+    const { instance, shell, buttons, fixture, projectId, read } = await setup({ mcp: false });
+    const parent = document.createElement('section');
+    fixture.replaceWith(parent);
+    parent.append(fixture);
+    fixtures.push(parent);
+    buttons[0]!.style.padding = '8px';
+    fixture.style.padding = '4px';
+    select(buttons[0]!);
+    const child = shell.view.selected[0]!;
+    action(shell, { type: 'editor-tab', value: 'styles' });
+    action(shell, { type: 'editor-position', position: { x: 200, y: 40 } });
+    action(shell, { type: 'style-change', property: 'padding-top', value: '16px', linked: false });
+    action(shell, { type: 'navigate-target', id: child.id, direction: 'parent' });
+    const container = shell.view.selected[0]!;
+    action(shell, { type: 'style-change', property: 'padding-top', value: '12px', linked: false });
+    await save(shell, 'Remember editor');
+    const note = shell.view.document!.annotations[0]!;
+    expect(note.targets).toHaveLength(2);
+    await vi.waitFor(async () =>
+      expect((await read())?.editorViews?.[note.id]).toMatchObject({
+        tab: 'styles',
+        targets: [container.id],
+        position: { x: 200, y: 40 },
+      }),
+    );
+    action(shell, { type: 'edit', id: note.id });
+    expect(shell.view.editorTab).toBe('styles');
+    expect(shell.view.editorPosition).toEqual({ x: 200, y: 40 });
+    expect(shell.view.styleEditor.scopeCount).toBe(1);
+    expect(shell.view.styleTargets.map((target) => target.id)).toEqual([container.id]);
+    expect(shell.view.targetNavigation[container.id]?.back).toBe(true);
+    action(shell, { type: 'navigate-target', id: container.id, direction: 'parent' });
+    const ancestor = shell.view.selected[0]!;
+    expect(ancestor.tagName).toBe('section');
+    expect(shell.view.styleTargets.map((target) => target.id)).toEqual([ancestor.id]);
+    expect(shell.view.styleEditor.scopeCount).toBe(1);
+    action(shell, { type: 'navigate-target', id: ancestor.id, direction: 'back' });
+    expect(shell.view.styleTargets.map((target) => target.id)).toEqual([container.id]);
+    action(shell, { type: 'close-edit' });
+    await vi.waitFor(async () =>
+      expect((await read())?.draft).toMatchObject({ editorOpen: false, editingId: note.id }),
+    );
+    instance.destroy();
+    const restored = createAinotation({ projectId, mcp: false });
+    instances.push(restored);
+    await restored.mount();
+    const next = document.querySelector('ainotation-inspector-shell')!;
+    await vi.waitFor(() => expect(next.view.storage).toBe('ready'));
+    next.shadowRoot!.querySelector<HTMLButtonElement>('.launcher')!.click();
+    action(next, { type: 'edit', id: note.id });
+    expect(next.view.editorTab).toBe('styles');
+    expect(next.view.editorPosition).toEqual({ x: 200, y: 40 });
+    expect(next.view.styleEditor.scopeCount).toBe(1);
+    expect(next.view.styleTargets.map((target) => target.id)).toEqual([container.id]);
+    expect(next.view.selected.map((target) => target.id)).toEqual([container.id]);
+    expect(next.view.targetNavigation[container.id]?.back).toBe(true);
+    action(next, { type: 'navigate-target', id: container.id, direction: 'back' });
+    expect(next.view.selected.map((target) => target.id)).toEqual([child.id]);
+    expect(next.view.targetNavigation[child.id]?.parent).toBe(true);
+    action(next, { type: 'navigate-target', id: child.id, direction: 'parent' });
+    await save(next, 'Navigation restored');
+    expect(next.view.document!.annotations[0]!.targets.map((target) => target.id).sort()).toEqual(
+      [container.id, child.id].sort(),
+    );
+  });
+
+  it('preserves explicit Shift selections and independent navigation paths on save and reopen', async () => {
+    const { shell, buttons, fixture, read } = await setup({ mcp: false });
+    const wrappers = buttons.map((button) => {
+      const wrapper = document.createElement('section');
+      fixture.append(wrapper);
+      wrapper.append(button);
+      button.style.padding = '8px';
+      wrapper.style.padding = '4px';
+      return wrapper;
+    });
+    await selectMultiple(shell, buttons);
+    const children = structuredClone(shell.view.selected);
+    action(shell, { type: 'style-change', property: 'padding-top', value: '16px', linked: false });
+    action(shell, { type: 'navigate-target', id: children[0]!.id, direction: 'parent' });
+    const parent = shell.view.selected[0]!;
+    expect(shell.view.selected.map((target) => target.id)).toEqual([parent.id, children[1]!.id]);
+    action(shell, { type: 'style-target', id: parent.id });
+    action(shell, { type: 'style-change', property: 'padding-top', value: '12px', linked: false });
+    await save(shell, 'Two independent slots');
+    const annotation = shell.view.document!.annotations[0]!;
+    expect(annotation.targets).toHaveLength(3);
+    await vi.waitFor(async () =>
+      expect((await read())?.editorViews?.[annotation.id]?.navigation?.slots).toHaveLength(2),
+    );
+    action(shell, { type: 'edit', id: annotation.id });
+    expect(shell.view.selected.map((target) => target.id)).toEqual([parent.id, children[1]!.id]);
+    expect(shell.view.styleTargetId).toBe(parent.id);
+    expect(shell.view.styleEditor.scopeCount).toBe(1);
+    action(shell, { type: 'navigate-target', id: parent.id, direction: 'back' });
+    expect(shell.view.selected.map((target) => target.id)).toEqual(
+      children.map((target) => target.id),
+    );
+    expect(shell.view.styleTargetId).toBe(children[0]!.id);
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['16px', '16px']);
+    expect(wrappers[0]!.style.paddingTop).toBe('12px');
+  });
+
+  it('closes the current editor on an ordinary outside pick before allowing another selection', async () => {
+    const { shell, buttons, read } = await setup({ mcp: false });
+    buttons[0]!.style.padding = '8px';
+    select(buttons[0]!);
+    const initial = structuredClone(shell.view.marker),
+      first = shell.view.selected[0]!.id;
+    action(shell, { type: 'draft', value: 'Keep this draft' });
+    action(shell, { type: 'style-change', property: 'padding-top', value: '16px', linked: false });
+    select(buttons[1]!);
+    expect(shell.view.editorOpen).toBe(false);
+    expect(shell.view.marker).toEqual(initial);
+    expect(shell.view.selected[0]!.id).toBe(first);
+    expect(shell.view.draft).toBe('Keep this draft');
+    expect(buttons[0]!.style.paddingTop).toBe('16px');
+    expect(shell.view.document!.annotations).toHaveLength(0);
+    await vi.waitFor(async () => expect((await read())?.draft.editorOpen).toBe(false));
+    select(buttons[1]!);
+    expect(shell.view.editorOpen).toBe(true);
+    expect(shell.view.selected[0]!.attributes.id).toBe(buttons[1]!.id);
+  });
+  it('can save removal of shared styles from another marker and persists global preview off', async () => {
+    const { instance, shell, buttons, read, projectId } = await setup({ mcp: false });
+    const button = buttons[0]!;
+    button.style.padding = '8px';
+    select(button);
+    action(shell, { type: 'style-change', property: 'padding-top', value: '20px', linked: false });
+    await save(shell, 'Original marker');
+    select(button);
+    action(shell, { type: 'style-reset' });
+    expect(shell.view.styleEditor.count).toBe(0);
+    expect(shell.view.styleEditor.dirty).toBe(true);
+    action(shell, { type: 'save' });
+    await vi.waitFor(() => expect(shell.view.document!.annotations).toHaveLength(2));
+    await vi.waitFor(() => expect(shell.view.editorOpen).toBe(false));
+    expect(shell.view.document!.targetStyles).toBeUndefined();
+    expect(shell.view.document!.annotations.every((note) => !note.targets[0]!.styleChanges)).toBe(
+      true,
+    );
+    const first = shell.view.document!.annotations[0]!;
+    action(shell, { type: 'edit', id: first.id });
+    action(shell, { type: 'style-change', property: 'padding-top', value: '24px', linked: false });
+    await save(shell, 'Saved again');
+    action(shell, { type: 'global-style-preview', value: false });
+    await vi.waitFor(async () => expect((await read())?.stylePreview?.enabled).toBe(false));
+    instance.destroy();
+    const next = createAinotation({ projectId, mcp: false });
+    instances.push(next);
+    await next.mount();
+    const restored = document.querySelector('ainotation-inspector-shell')!;
+    await vi.waitFor(() => expect(restored.view.storage).toBe('ready'));
+    expect(restored.view.styleEditor.globalPreview).toBe(false);
+    expect(button.style.paddingTop).toBe('8px');
+    action(restored, { type: 'global-style-preview', value: true });
+    expect(button.style.paddingTop).toBe('24px');
+  });
+  it('shares one target style across markers while keeping global and local previews independent', async () => {
+    const { shell, buttons, read } = await setup({ mcp: false });
+    const [first, second] = buttons as [HTMLButtonElement, HTMLButtonElement];
+    first.style.padding = '8px';
+    second.style.padding = '12px';
+    const edit = (value: string) =>
+      action(shell, { type: 'style-change', property: 'padding-top', value, linked: false });
+    select(first);
+    edit('20px');
+    await save(shell, 'First marker');
+    const a = shell.view.document!.annotations[0]!;
+    expect(first.style.paddingTop).toBe('20px');
+    select(second);
+    edit('30px');
+    await save(shell, 'Second element');
+    const b = shell.view.document!.annotations[1]!;
+    expect(first.style.paddingTop).toBe('20px');
+    expect(second.style.paddingTop).toBe('30px');
+    select(first);
+    await save(shell, 'Another marker on first');
+    const c = shell.view.document!.annotations[2]!;
+    expect(c.targets[0]!.id).toBe(a.targets[0]!.id);
+    expect(Object.keys(shell.view.document!.targetStyles!)).toHaveLength(2);
+    action(shell, { type: 'edit', id: c.id });
+    edit('24px');
+    expect(shell.view.styleEditor.sharedMarkers).toBe(2);
+    action(shell, { type: 'close-edit' });
+    expect(shell.view.editorOpen).toBe(false);
+    expect(first.style.paddingTop).toBe('24px');
+    expect(second.style.paddingTop).toBe('30px');
+    action(shell, { type: 'edit', id: a.id });
+    expect(shell.view.styleEditor.current['padding-top']).toBe('24px');
+    action(shell, { type: 'style-preview', value: false });
+    expect(first.style.paddingTop).toBe('8px');
+    expect(second.style.paddingTop).toBe('30px');
+    action(shell, { type: 'global-style-preview', value: false });
+    expect(first.style.paddingTop).toBe('8px');
+    expect(second.style.paddingTop).toBe('12px');
+    action(shell, { type: 'global-style-preview', value: true });
+    expect(first.style.paddingTop).toBe('8px');
+    expect(second.style.paddingTop).toBe('30px');
+    action(shell, { type: 'style-preview', value: true });
+    expect(first.style.paddingTop).toBe('24px');
+    action(shell, { type: 'cancel-edit' });
+    await vi.waitFor(() => expect(shell.view.editorOpen).toBe(false));
+    expect(first.style.paddingTop).toBe('20px');
+    expect(second.style.paddingTop).toBe('30px');
+    action(shell, { type: 'edit', id: c.id });
+    edit('26px');
+    await save(shell, 'Shared final size');
+    const doc = shell.view.document!;
+    expect(
+      doc.annotations
+        .filter((note) => note.targets[0]!.id === a.targets[0]!.id)
+        .map((note) => note.targets[0]!.styleChanges?.[0]?.value),
+    ).toEqual(['26px', '26px']);
+    expect(doc.annotations.find((note) => note.id === a.id)!.comment).toBe('First marker');
+    action(shell, { type: 'delete', id: c.id });
+    await vi.waitFor(() => expect(shell.view.document!.annotations).toHaveLength(2));
+    expect(first.style.paddingTop).toBe('26px');
+    action(shell, { type: 'delete', id: a.id });
+    await vi.waitFor(() => expect(shell.view.document!.annotations).toHaveLength(1));
+    expect(first.style.paddingTop).toBe('8px');
+    expect(second.style.paddingTop).toBe('30px');
+    expect(Object.keys(shell.view.document!.targetStyles!)).toEqual([b.targets[0]!.id]);
+    action(shell, { type: 'global-style-preview', value: false });
+    await vi.waitFor(async () => expect((await read())?.stylePreview?.enabled).toBe(false));
+    expect(second.style.paddingTop).toBe('12px');
+  });
+
+  it('applies multi-target edits atomically with mixed values, relative steps and partial local preview', async () => {
+    const { shell, buttons } = await setup({ mcp: false });
+    buttons[0]!.style.padding = '8px';
+    buttons[1]!.style.padding = '12px';
+    await selectMultiple(shell, buttons);
+    expect(shell.view.styleTargetId).toBe('');
+    expect(shell.view.styleEditor.scopeCount).toBe(2);
+    expect(shell.view.styleEditor.mixed).toContain('padding-top');
+    action(shell, {
+      type: 'style-step',
+      property: 'padding-top',
+      direction: 1,
+      coarse: false,
+      linked: false,
+    });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['9px', '13px']);
+    action(shell, { type: 'style-history', direction: 'undo' });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['8px', '12px']);
+    action(shell, { type: 'style-history', direction: 'redo' });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['9px', '13px']);
+    action(shell, { type: 'style-change', property: 'padding-top', value: '20px', linked: false });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['20px', '20px']);
+    expect(shell.view.styleEditor.mixed).not.toContain('padding-top');
+    action(shell, { type: 'style-reset', property: 'padding-top' });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['8px', '12px']);
+    action(shell, { type: 'style-history', direction: 'undo' });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['20px', '20px']);
+    const firstId = shell.view.selected[0]!.id;
+    action(shell, { type: 'style-target', id: firstId });
+    action(shell, { type: 'style-preview', value: false });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['8px', '20px']);
+    action(shell, { type: 'style-target', id: '' });
+    expect(shell.view.styleEditor.previewMixed).toBe(true);
+    action(shell, { type: 'style-preview', value: true });
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['20px', '20px']);
+    await save(shell, 'Batch change');
+    expect(
+      Object.values(shell.view.document!.targetStyles!).map((changes) => changes[0]!.before),
+    ).toEqual(['8px', '12px']);
+    expect(buttons.map((button) => button.style.paddingTop)).toEqual(['20px', '20px']);
+  });
+  it.each([true, false])(
+    'keeps preview %s while navigating between parent and child, and captures unmodified geometry',
+    async (enabled) => {
+      const { shell, buttons, fixture, read } = await setup({ mcp: false });
+      const button = buttons[0]!;
+      button.style.padding = '8px';
+      fixture.style.padding = '4px';
+      const originalHeight = fixture.getBoundingClientRect().height;
+      select(button);
+      expect(shell.view.styleEditor.preview).toBe(true);
+      const child = structuredClone(shell.view.selected[0]!);
+      action(shell, { type: 'editor-tab', value: 'styles' });
+      action(shell, {
+        type: 'style-change',
+        property: 'padding-top',
+        value: '20px',
+        linked: false,
+      });
+      if (!enabled) action(shell, { type: 'global-style-preview', value: false });
+      action(shell, { type: 'navigate-target', id: child.id, direction: 'parent' });
+      const parent = shell.view.selected[0]!;
+      expect(parent.attributes.id).toBe(fixture.id);
+      expect(parent.rect.height).toBe(originalHeight);
+      expect(parent.styles.padding).toBe('4px');
+      expect(shell.view.styleEditor.globalPreview).toBe(enabled);
+      expect(button.style.paddingTop).toBe(enabled ? '20px' : '8px');
+      action(shell, {
+        type: 'style-change',
+        property: 'padding-top',
+        value: '12px',
+        linked: false,
+      });
+      expect(fixture.style.paddingTop).toBe(enabled ? '12px' : '4px');
+      for (let i = 0; i < 2; i++) {
+        action(shell, { type: 'navigate-target', id: parent.id, direction: 'back' });
+        expect(shell.view.selected[0]!.id).toBe(child.id);
+        expect(shell.view.selected[0]!.styles.padding).toBe('8px');
+        expect(shell.view.styleEditor.globalPreview).toBe(enabled);
+        expect(button.style.paddingTop).toBe(enabled ? '20px' : '8px');
+        action(shell, { type: 'navigate-target', id: child.id, direction: 'parent' });
+        expect(shell.view.styleEditor.globalPreview).toBe(enabled);
+        expect(fixture.style.paddingTop).toBe(enabled ? '12px' : '4px');
+      }
+      await vi.waitFor(async () => expect((await read())?.draft.styleTargets).toHaveLength(2));
+      expect(shell.view.styleEditor.globalPreview).toBe(enabled);
+    },
+  );
+  it('keeps previews when collapsed and isolates shared drafts and preview preferences by URL', async () => {
+    const { shell, buttons, read, pageKeys, projectId } = await setup({ mcp: false });
+    const button = buttons[0]!;
+    button.style.padding = '8px';
+    select(button);
+    action(shell, { type: 'style-change', property: 'padding-top', value: '24px', linked: false });
+    await vi.waitFor(async () =>
+      expect((await read())?.draft.styleTargets?.[0]?.styleChanges).toHaveLength(1),
+    );
+    shell.expanded = false;
+    action(shell, { type: 'set-picking', value: false });
+    expect(button.style.paddingTop).toBe('24px');
+    shell.expanded = true;
+    action(shell, { type: 'set-picking', value: true });
+    expect(shell.view.styleEditor.preview).toBe(true);
+    action(shell, { type: 'style-preview', value: true });
+    expect(button.style.paddingTop).toBe('24px');
+    const original = location.href;
+    const nextUrl = new URL(original);
+    nextUrl.hash = 'style-route-test';
+    pageKeys.push(JSON.stringify([projectId, nextUrl.href]));
+    try {
+      history.pushState(null, '', nextUrl.href);
+      action(shell, { type: 'draft', value: 'Must not enter previous page' });
+      await vi.waitFor(() => expect(shell.view.document?.url).toBe(nextUrl.href));
+      expect(button.style.paddingTop).toBe('8px');
+      expect(shell.view.styleEditor.count).toBe(0);
+      history.replaceState(null, '', original);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      await vi.waitFor(() => expect(shell.view.document?.url).toBe(original));
+      expect(shell.view.styleEditor.count).toBe(1);
+      expect(shell.view.styleEditor.preview).toBe(true);
+      expect(button.style.paddingTop).toBe('24px');
+    } finally {
+      history.replaceState(null, '', original);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    }
+  });
+  it('persists shared styles, keeps saved previews and restores committed values on cancel', async () => {
+    const { instance, shell, buttons, read, projectId } = await setup({ mcp: false });
+    const button = buttons[0]!;
+    button.style.padding = '8px';
+    select(button);
+    await vi.waitFor(() => expect(shell.view.selected).toHaveLength(1));
+    const original = structuredClone(shell.view.selected[0]!);
+    action(shell, { type: 'editor-tab', value: 'styles' });
+    action(shell, { type: 'style-change', property: 'padding-top', value: '20px', linked: false });
+    await vi.waitFor(async () =>
+      expect((await read())?.draft.styleTargets?.[0]?.styleChanges?.[0]?.value).toBe('20px'),
+    );
+    expect(button.style.paddingTop).toBe('20px');
+    action(shell, { type: 'save' });
+    await vi.waitFor(() => expect(shell.view.document?.annotations).toHaveLength(1));
+    await vi.waitFor(() => expect(shell.view.editorOpen).toBe(false));
+    expect(button.style.paddingTop).toBe('20px');
+    const saved = shell.view.document!.annotations[0]!;
+    expect(saved.targets[0]!.styles).toEqual(original.styles);
+    expect(saved.targets[0]!.styleChanges).toEqual([
+      { property: 'padding-top', before: '8px', value: '20px' },
+    ]);
+    vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    vi.spyOn(navigator.clipboard, 'write').mockResolvedValue();
+    expect(await instance.copyFeedback()).toContain('padding-top: "8px" → "20px"');
+    action(shell, { type: 'edit', id: saved.id });
+    await vi.waitFor(() => expect(shell.view.editingId).toBe(saved.id));
+    expect(shell.view.styleEditor.preview).toBe(true);
+    action(shell, { type: 'style-preview', value: true });
+    expect(button.style.paddingTop).toBe('20px');
+    action(shell, { type: 'style-change', property: 'padding-top', value: '30px', linked: false });
+    action(shell, { type: 'cancel-edit' });
+    await vi.waitFor(() => expect(shell.view.editorOpen).toBe(false));
+    expect(button.style.paddingTop).toBe('20px');
+    expect(shell.view.document!.annotations[0]).toEqual(saved);
+    action(shell, { type: 'edit', id: saved.id });
+    action(shell, { type: 'style-reset' });
+    await vi.waitFor(async () =>
+      expect((await read())?.styleDrafts?.[0]?.styleChanges).toEqual([]),
+    );
+    instance.destroy();
+    const remounted = createAinotation({ projectId, mcp: false });
+    instances.push(remounted);
+    await remounted.mount();
+    const restored = document.querySelector('ainotation-inspector-shell')!;
+    await vi.waitFor(() => expect(restored.view.storage).toBe('ready'));
+    expect(restored.view.editingId).toBe(saved.id);
+    expect(restored.view.styleEditor.count).toBe(0);
+    expect(restored.view.document!.annotations[0]!.targets[0]!.styleChanges).toHaveLength(1);
+  });
+  it('restores per-target shared drafts and the global preview across remount', async () => {
+    const { instance, shell, buttons, fixture, projectId, read } = await setup({ mcp: false });
+    buttons[0]!.style.padding = '8px';
+    fixture.style.padding = '4px';
+    select(buttons[0]!);
+    const original = shell.view.selected[0]!;
+    action(shell, { type: 'style-change', property: 'padding-top', value: '20px', linked: false });
+    action(shell, { type: 'navigate-target', id: original.id, direction: 'parent' });
+    await vi.waitFor(() => expect(shell.view.selected[0]?.attributes.id).toBe(fixture.id));
+    action(shell, { type: 'style-change', property: 'padding-top', value: '12px', linked: false });
+    await vi.waitFor(async () => expect((await read())?.draft.styleTargets).toHaveLength(2));
+    instance.destroy();
+    expect(buttons[0]!.style.paddingTop).toBe('8px');
+    expect(fixture.style.paddingTop).toBe('4px');
+    const next = createAinotation({ projectId, mcp: false });
+    instances.push(next);
+    await next.mount();
+    const nextShell = document.querySelector('ainotation-inspector-shell')!;
+    await vi.waitFor(() => expect(nextShell.view.styleEditor.count).toBe(2));
+    expect(nextShell.view.styleEditor.preview).toBe(true);
+    expect(buttons[0]!.style.paddingTop).toBe('20px');
+    expect(fixture.style.paddingTop).toBe('12px');
+    nextShell.shadowRoot!.querySelector<HTMLButtonElement>('.launcher')!.click();
+    action(nextShell, { type: 'save' });
+    await vi.waitFor(() => expect(nextShell.view.document?.annotations).toHaveLength(1));
+    expect(nextShell.view.document!.annotations[0]!.targets).toHaveLength(2);
+    expect(
+      nextShell.view.document!.annotations[0]!.targets.every(
+        (target) => target.styleChanges?.length === 1,
+      ),
+    ).toBe(true);
+  });
   it('retargets drafts without losing text, persists explicit saved-target edits and cancels without changing the saved target', async () => {
     const { instance, shell, buttons, fixture, read } = await setup();
     select(buttons[0]!);
@@ -191,7 +728,8 @@ describe('mounted feedback runtime', () => {
     await vi.waitFor(() => expect(shell.view.editorOpen).toBe(false));
     expect(instance.getDocument()!.annotations[0]).toEqual(saved);
     action(shell, { type: 'edit', id: saved.id });
-    action(shell, { type: 'navigate-target', id: saved.targets[0]!.id, direction: 'parent' });
+    expect(shell.view.selected[0]!.attributes.id).toBe(fixture.id);
+    expect(shell.view.targetNavigation[shell.view.selected[0]!.id]?.back).toBe(true);
     await vi.waitFor(async () => expect((await read())?.draft.targetsAdjusted).toBe(true));
     instance.destroy();
     await instance.mount();

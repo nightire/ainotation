@@ -58,7 +58,11 @@ function raw(
 
 it('requires exact Origin, Host and bearer auth on health and all actual routes', async () => {
   const { server, document, headers } = await setup();
-  expect((await raw(`${server.url}/health`, headers)).status).toBe(200);
+  const health = await raw(`${server.url}/health`, headers);
+  expect(health.status).toBe(200);
+  expect(JSON.parse(health.body)).toMatchObject({
+    capabilities: { styleSuggestions: true, sharedStyles: true },
+  });
   expect(
     (
       await raw(`${server.url}/health`, {

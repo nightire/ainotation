@@ -4,7 +4,9 @@ import type {
   TargetSnapshot,
   OutputDetail,
   FeedbackImage,
+  StyleProperty,
 } from '@ainotation/schema';
+import type { StyleEditorState, StyleLinkage } from './style-editor';
 import type { Locale, UiMessage } from '../i18n';
 import { en } from '../i18n/en';
 
@@ -37,6 +39,16 @@ export interface InspectorPosition {
   left: number;
   top: number;
   opensLeft: boolean;
+}
+export interface EditorPresentation {
+  tab: 'feedback' | 'styles';
+  targets: string[];
+  position: { x: number; y: number } | null;
+  navigation?: { slots: SelectionNavigationSlot[]; referenceIds: string[] };
+}
+export interface SelectionNavigationSlot {
+  target: TargetSnapshot;
+  history: TargetSnapshot[];
 }
 export interface InspectorViewState {
   document: FeedbackDocument | null;
@@ -71,11 +83,25 @@ export interface InspectorViewState {
   projectName: string;
   images: FeedbackImage[];
   imageUrls: Record<string, string>;
+  editorTab: 'feedback' | 'styles';
+  editorSessionId: string;
+  editorPosition: { x: number; y: number } | null;
+  styleTargetId: string;
+  styleTargets: TargetSnapshot[];
+  styleEditor: StyleEditorState;
 }
 
 export type InspectorAction =
   | {
-      type: 'save' | 'cancel-edit' | 'copy' | 'export' | 'disconnect' | 'clear-all';
+      type:
+        | 'save'
+        | 'cancel-edit'
+        | 'close-edit'
+        | 'open-edit'
+        | 'copy'
+        | 'export'
+        | 'disconnect'
+        | 'clear-all';
     }
   | { type: 'set-picking'; value: boolean }
   | { type: 'set-output-detail'; value: OutputDetail }
@@ -91,7 +117,22 @@ export type InspectorAction =
   | { type: 'resolve-recovery'; source: 'browser' | 'server' }
   | { type: 'screenshot' }
   | { type: 'import-image'; file: File }
-  | { type: 'remove-image' | 'download-image' | 'edit-image'; id: string };
+  | { type: 'remove-image' | 'download-image' | 'edit-image'; id: string }
+  | { type: 'editor-tab'; value: 'feedback' | 'styles' }
+  | { type: 'editor-position'; position: { x: number; y: number } }
+  | { type: 'style-target'; id: string }
+  | { type: 'style-preview'; value: boolean; force?: boolean }
+  | { type: 'global-style-preview'; value: boolean }
+  | {
+      type: 'style-step';
+      property: StyleProperty;
+      direction: number;
+      coarse: boolean;
+      linked: StyleLinkage;
+    }
+  | { type: 'style-change'; property: StyleProperty; value: string; linked: StyleLinkage }
+  | { type: 'style-reset'; property?: StyleProperty; linked?: StyleLinkage }
+  | { type: 'style-history'; direction: 'undo' | 'redo' };
 
 export function emptyViewState(): InspectorViewState {
   return {
@@ -124,5 +165,29 @@ export function emptyViewState(): InspectorViewState {
     projectName: '',
     images: [],
     imageUrls: {},
+    editorTab: 'feedback',
+    editorSessionId: '',
+    editorPosition: null,
+    styleTargetId: '',
+    styleTargets: [],
+    styleEditor: {
+      preview: false,
+      values: {},
+      changes: [],
+      count: 0,
+      dirty: false,
+      canUndo: false,
+      canRedo: false,
+      problem: null,
+      globalPreview: true,
+      globalCount: 0,
+      previewMixed: false,
+      scopeCount: 0,
+      current: {},
+      mixed: [],
+      mixedOriginal: [],
+      stepProperties: [],
+      sharedMarkers: 0,
+    },
   };
 }

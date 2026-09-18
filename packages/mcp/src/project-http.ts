@@ -4,6 +4,7 @@ import {
   feedbackExport,
   feedbackExportJsonSchema,
   SyncRequestSchema,
+  STYLE_SYNC_CAPABILITIES,
 } from '@ainotation/schema';
 import { z } from 'zod';
 import { AnnotationPatchSchema, CreateAnnotationSchema, StoreError } from './store';
@@ -169,6 +170,7 @@ export async function startProjectHttpServer(options: {
           version: 1,
           instanceId,
           project: { projectId: scope.project.projectId, name: scope.project.name },
+          capabilities: STYLE_SYNC_CAPABILITIES,
         });
         return;
       }

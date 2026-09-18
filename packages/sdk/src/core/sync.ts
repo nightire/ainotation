@@ -1,7 +1,12 @@
-import { SyncResponseSchema, SyncErrorResponseSchema } from '@ainotation/schema';
+import {
+  SyncResponseSchema,
+  SyncErrorResponseSchema,
+  StyleSyncCapabilitiesSchema,
+} from '@ainotation/schema';
 import type { DraftRecord } from './storage';
 import type { SyncResponse, SyncRequest } from '@ainotation/schema';
 import { syncImages } from './image-sync';
+import { requiresSharedStyles } from './style-sync';
 import { uiError, msg, errorMessage, type UiMessage } from '../i18n';
 
 export interface McpConnection {
@@ -74,6 +79,11 @@ export function createSyncClient(options: {
   let wanted = false;
   let running: Promise<void> | undefined;
   let streaming: AbortController | undefined;
+  const unsupportedStyles = () => {
+    paused = true;
+    problem = msg('styleSyncUnsupported');
+    throw uiError('styleSyncUnsupported');
+  };
   const sync = (): Promise<void> => {
     wanted = true;
     if (running) return running;
@@ -86,6 +96,24 @@ export function createSyncClient(options: {
           if (stopped) return;
           const connection = await resolveConnection();
           if (stopped) return;
+          const needsStyles = requiresSharedStyles(record);
+          if (needsStyles) {
+            // Old services strip unknown fields and consume operation IDs. Probe
+            // without writing before sending a style-bearing document or operation.
+            const health = await fetch(`${connection.endpoint}/health`, {
+              headers: { Authorization: `Bearer ${connection.token}` },
+              credentials: 'omit',
+              redirect: 'error',
+              cache: 'no-store',
+              signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+            });
+            if (health.status === 404) unsupportedStyles();
+            if (!health.ok) throw new Error(`MCP capability check failed (${health.status}).`);
+            const data = await health.json();
+            if (!StyleSyncCapabilitiesSchema.safeParse(data?.capabilities).success)
+              unsupportedStyles();
+            if (stopped) return;
+          }
           const response = await fetch(
             `${connection.endpoint}/sessions/${options.sessionId}/sync`,
             {
@@ -126,6 +154,8 @@ export function createSyncClient(options: {
             );
           }
           const data = SyncResponseSchema.parse(await response.json());
+          if (needsStyles && !StyleSyncCapabilitiesSchema.safeParse(data).success)
+            unsupportedStyles();
           if (data.document.id !== options.sessionId || data.document.url !== record.document.url)
             throw new Error('MCP returned another session.');
           if (data.recovery) {

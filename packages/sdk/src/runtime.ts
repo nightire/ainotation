@@ -11,7 +11,7 @@ import type { InspectorShell } from './ui';
 import { createSelection, capturePage } from './core/selection';
 import { createDraftStore, type DraftRecord } from './core/storage';
 import { createSyncClient, normalizeConnection, type McpConnection } from './core/sync';
-import { emptyViewState, type InspectorAction } from './core/types';
+import { emptyViewState, type InspectorAction, type EditorPresentation } from './core/types';
 import { createMarkerLayer } from './ui/markers';
 import { bindPreferences } from './runtime-preferences';
 import { copyProjectFeedback, createFeedbackDownloads } from './core/handoff';
@@ -20,6 +20,7 @@ import { requestCapture } from './core/capture';
 import { describeImage } from './core/images';
 import { themeStyles } from './ui/theme';
 import { targetLocatorText } from './ui/target-description';
+import { createStyleEditor } from './core/style-editor';
 import {
   createI18n,
   detectLocale,
@@ -65,6 +66,61 @@ export async function createRuntime(
   let drawing: AbortController | null = null;
   const imageUrls = new Map<string, string>();
   let markerLayer: ReturnType<typeof createMarkerLayer> | undefined;
+  let styleEditor: ReturnType<typeof createStyleEditor> | undefined;
+  let editorViews: Record<string, EditorPresentation> = {};
+  function rememberEditor() {
+    if (!view.editorSessionId) return;
+    editorViews[view.editorSessionId] = {
+      tab: view.editorTab,
+      targets: styleEditor?.editingTargets() ?? view.selected.map((target) => target.id),
+      position: view.editorPosition ? { ...view.editorPosition } : null,
+      navigation: {
+        slots: selection.getNavigation(),
+        referenceIds: (
+          record?.document.annotations.find((annotation) => annotation.id === view.editorSessionId)
+            ?.targets ?? mergeStyleTargets(view.selected)
+        ).map((target) => target.id),
+      },
+    };
+  }
+  function restoreEditorPresentation(id: string) {
+    view.editorSessionId = id;
+    const presentation = editorViews[id] ?? record?.editorViews?.[id];
+    view.editorTab = presentation?.tab ?? 'feedback';
+    view.editorPosition = presentation?.position ? { ...presentation.position } : null;
+    if (presentation) styleEditor?.selectScope(presentation.targets);
+  }
+  function restoreEditingSelection(fallback: TargetSnapshot[], id: string, draft = false) {
+    const saved = (editorViews[id] ?? record?.editorViews?.[id])?.navigation;
+    const expectedIds = draft ? fallback.map((target) => target.id) : (saved?.referenceIds ?? []);
+    const actualIds = draft
+      ? (saved?.slots.map((slot) => slot.target.id) ?? [])
+      : fallback.map((target) => target.id);
+    // Only restore recorded navigation, never infer chains from current DOM nesting.
+    // Agent edits that change the referenced targets invalidate the old grouping.
+    const compatible =
+      saved &&
+      expectedIds.length === actualIds.length &&
+      expectedIds.every((key) => actualIds.includes(key));
+    adjustingTarget = true;
+    try {
+      if (compatible) {
+        const latest = new Map(fallback.map((target) => [target.id, target]));
+        const slots = saved.slots.map((slot) => ({
+          target: structuredClone(latest.get(slot.target.id) ?? slot.target),
+          history: slot.history.map((target) => structuredClone(latest.get(target.id) ?? target)),
+        }));
+        selection.restoreNavigation(slots);
+        view.selected = slots.map((slot) => slot.target);
+      } else {
+        // Clear a previous marker's path even if both markers select the same node.
+        selection.restoreNavigation(fallback.map((target) => ({ target, history: [] })));
+        view.selected = structuredClone(fallback);
+      }
+    } finally {
+      adjustingTarget = false;
+    }
+  }
   let pendingPicking: boolean | null = null;
   let storageReady = false;
   let navigation: ReturnType<typeof setInterval> | undefined;
@@ -72,12 +128,24 @@ export async function createRuntime(
   let projectRecovery: AbortController | undefined;
   let applySelectionTheme: (theme: string) => void = () => {};
   let sync: ReturnType<typeof createSyncClient> | undefined;
+  function mergeStyleTargets(base: TargetSnapshot[]): TargetSnapshot[] {
+    const result = styleEditor?.project(base) ?? structuredClone(base);
+    for (const target of styleEditor?.changedTargets() ?? [])
+      if (!result.some((item) => item.id === target.id)) result.push(target);
+    return result;
+  }
   const credentialsKey = `ainotation:mcp:${project}`;
   const render = () => {
     if (!disposed && !signal.aborted) {
       i18n.setLocale(view.locale);
       if (view.messageDescriptor) view.message = formatMessage(view.locale, view.messageDescriptor);
       applySelectionTheme(view.theme);
+      if (styleEditor) {
+        styleEditor.reconcile();
+        view.styleTargetId = styleEditor.active();
+        view.styleTargets = styleEditor.scopeTargets();
+        view.styleEditor = styleEditor.state();
+      }
       for (const [id, url] of imageUrls) {
         if (!view.images.some((image) => image.id === id)) {
           URL.revokeObjectURL(url);
@@ -136,11 +204,18 @@ export async function createRuntime(
     view.availability = Object.fromEntries(
       [
         ...view.selected,
+        ...view.styleTargets,
         ...(record?.document.annotations.flatMap((annotation) => annotation.targets) || []),
       ].map((target) => [target.id, selection.availability(target)]),
     );
   }
   const selection = createSelection({
+    onOutsideClick() {
+      if (!view.editorOpen) return false;
+      if (!saving && !drawing) void handle({ type: 'close-edit' }).catch(report);
+      return true;
+    },
+    capture: (read) => (styleEditor ? styleEditor.capture(read) : read()),
     visible: shell.expanded,
     appearance: { theme: view.theme, cssText: themeStyles.cssText },
     onChange() {
@@ -160,7 +235,16 @@ export async function createRuntime(
     },
     onSelect(anchor, targets) {
       if (disposed || reconcilePage() || view.storage === 'loading') return;
+      const retainRelated = !view.editingId && !!view.marker;
+      if (retainRelated && mergeStyleTargets(targets).length > 20) {
+        selection.setTargets(view.selected);
+        message(msg('styleTargetLimit'));
+        return;
+      }
       editorVersion++;
+      rememberEditor();
+      const sessionId =
+        view.editingId || !view.editorSessionId ? crypto.randomUUID() : view.editorSessionId;
       view.targetsAdjusted = false;
       if (view.editingId) {
         view.draft = '';
@@ -168,6 +252,8 @@ export async function createRuntime(
       }
       view.editingId = null;
       view.selected = targets;
+      styleEditor?.begin(targets, retainRelated);
+      restoreEditorPresentation(sessionId);
       selectionPage = capturePage();
       view.marker = anchor;
       view.editorOpen = true;
@@ -185,6 +271,9 @@ export async function createRuntime(
         return;
       }
       editorVersion++;
+      rememberEditor();
+      view.editorSessionId = '';
+      view.editorPosition = null;
       view.targetsAdjusted = false;
       if (view.editingId) {
         view.draft = '';
@@ -200,6 +289,7 @@ export async function createRuntime(
       void handle({ type: 'cancel-edit' }).catch(report);
     },
   });
+  styleEditor = createStyleEditor((target) => selection.getElement(target), render);
   applySelectionTheme = (theme) => selection.setTheme(theme);
   markerLayer = createMarkerLayer({
     onAction: (action) => {
@@ -222,7 +312,13 @@ export async function createRuntime(
     };
   }
 
-  function resetEditor() {
+  function resetEditor(cancel = false) {
+    rememberEditor();
+    if (cancel) styleEditor?.cancel();
+    styleEditor?.clearScope();
+    view.editorTab = 'feedback';
+    view.editorSessionId = '';
+    view.editorPosition = null;
     drawing?.abort();
     editorVersion++;
     view.targetsAdjusted = false;
@@ -246,6 +342,7 @@ export async function createRuntime(
     if (disposed) return;
     if (reconcilePage() || next.document.url !== pageUrl) return;
     record = next;
+    styleEditor?.sync(next.document);
     view.document = next.document;
     view.storage = store.available ? 'ready' : 'unavailable';
     if (!view.editorOpen && !view.draft && next.draft.text && !next.draft.editorOpen) {
@@ -258,7 +355,11 @@ export async function createRuntime(
       !next.document.annotations.some((annotation) => annotation.id === view.editingId)
     ) {
       drawing?.abort();
+      styleEditor?.cancel();
+      styleEditor?.clearScope();
       view.editingId = null;
+      view.editorSessionId = '';
+      view.editorPosition = null;
       view.editorOpen = false;
       view.marker = null;
       selection.clear();
@@ -272,17 +373,39 @@ export async function createRuntime(
       text: view.draft,
       images: structuredClone(view.images),
       editingId: view.editingId,
-      targets: view.editorOpen ? structuredClone(view.selected) : selection.getTargets(),
+      targets: view.editorOpen
+        ? mergeStyleTargets(view.selected).slice(0, view.selected.length)
+        : selection.getTargets(),
       ...(view.marker ? { marker: view.marker } : {}),
       ...(selectionPage ? { page: selectionPage } : {}),
       editorOpen: view.editorOpen,
       ...(view.targetsAdjusted ? { targetsAdjusted: true } : {}),
+      ...(view.editorSessionId ? { editorSessionId: view.editorSessionId } : {}),
+      ...(styleEditor?.changedTargets().length
+        ? { styleTargets: styleEditor.changedTargets() }
+        : {}),
     };
   }
   async function saveDraft() {
+    rememberEditor();
     const token = pageGeneration;
     const draft = snapshotDraft();
-    const next = await store.update(pageKey, pageUrl, (current) => ({ ...current, draft }));
+    const styleDrafts = styleEditor?.drafts() ?? [];
+    const stylePreview = styleEditor?.preference();
+    const presentations = structuredClone(editorViews);
+    const next = await store.update(pageKey, pageUrl, (current) => ({
+      ...current,
+      draft,
+      styleDrafts,
+      ...(stylePreview ? { stylePreview } : {}),
+      editorViews: Object.fromEntries(
+        Object.entries({ ...current.editorViews, ...presentations }).filter(
+          ([id]) =>
+            id === draft.editorSessionId ||
+            current.document.annotations.some((annotation) => annotation.id === id),
+        ),
+      ),
+    }));
     if (token === pageGeneration) accept(next);
   }
   async function mutate(operation: FeedbackOperation, submittedDraft?: DraftRecord['draft']) {
@@ -362,6 +485,7 @@ export async function createRuntime(
     const next = await store.load(pageKey, pageUrl);
     if (token !== pageGeneration || disposed || signal.aborted) return;
     record = next;
+    editorViews = structuredClone(next.editorViews ?? {});
     view.draft = next.draft.text;
     view.images = structuredClone(next.draft.images ?? []);
     view.editingId =
@@ -369,11 +493,25 @@ export async function createRuntime(
       next.document.annotations.some((annotation) => annotation.id === next.draft.editingId)
         ? next.draft.editingId
         : null;
-    selection.setTargets(next.draft.targets);
+    const sessionId =
+      view.editingId ??
+      next.draft.editorSessionId ??
+      ((next.draft.editorOpen ?? next.draft.targets.length > 0) ? crypto.randomUUID() : '');
+    restoreEditingSelection(next.draft.targets, sessionId, true);
     view.marker = next.draft.marker ?? fallbackAnchor(next.draft.targets);
     view.editorOpen = next.draft.editorOpen ?? next.draft.targets.length > 0;
-    view.selected = structuredClone(next.draft.targets);
     view.targetsAdjusted = next.draft.targetsAdjusted ?? false;
+    styleEditor?.reset();
+    styleEditor?.restorePreference(next.stylePreview);
+    styleEditor?.sync(next.document);
+    styleEditor?.loadDrafts(next.styleDrafts ?? next.draft.styleTargets ?? []);
+    styleEditor?.begin([
+      ...(next.document.annotations.find((annotation) => annotation.id === view.editingId)
+        ?.targets ?? []),
+      ...(next.draft.styleTargets ?? []),
+    ]);
+    styleEditor?.begin(view.selected, true);
+    restoreEditorPresentation(sessionId);
     selectionPage = next.draft.page ?? (view.editorOpen ? capturePage() : null);
     selection.setVisible(shell.expanded);
     accept(next);
@@ -501,15 +639,30 @@ export async function createRuntime(
     const index = view.selected.findIndex((target) => target.id === action.id);
     if (index < 0) return;
     let adjusted = false;
+    let exceededLimit = false;
+    const editingScope = styleEditor?.editingTargets() ?? [];
     adjustingTarget = true;
     try {
-      adjusted = selection.navigateTarget(action.id, action.direction);
+      styleEditor?.capture(() => {
+        adjusted = selection.navigateTarget(action.id, action.direction, (targets) => {
+          exceededLimit = mergeStyleTargets(targets).length > 20;
+          return !exceededLimit;
+        });
+        if (!adjusted) return;
+        view.selected = selection.getTargets();
+        styleEditor.begin(view.selected, true);
+        styleEditor.selectScope(
+          editingScope.map((id) => (id === action.id ? view.selected[index]!.id : id)),
+        );
+      });
     } finally {
       adjustingTarget = false;
     }
-    if (!adjusted) return;
+    if (!adjusted) {
+      if (exceededLimit) message(msg('styleTargetLimit'));
+      return;
+    }
     editorVersion++;
-    view.selected = selection.getTargets();
     view.message = '';
     delete view.messageDescriptor;
     const original = view.document?.annotations.find(
@@ -559,7 +712,9 @@ export async function createRuntime(
       return;
     }
     if (action.type === 'set-picking') {
-      if (!action.value) drawing?.abort();
+      if (!action.value) {
+        drawing?.abort();
+      }
       pendingPicking = view.storage === 'loading' ? action.value : null;
       selection.setVisible(action.value && view.storage !== 'loading');
       selection.setPicking(action.value && view.storage !== 'loading');
@@ -611,6 +766,64 @@ export async function createRuntime(
       return;
     }
     if (!record) throw uiError('feedbackLoading');
+    if (action.type === 'editor-tab') {
+      view.editorTab = action.value;
+      render();
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'editor-position') {
+      if (!Number.isFinite(action.position.x) || !Number.isFinite(action.position.y)) return;
+      view.editorPosition = { ...action.position };
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'style-target') {
+      styleEditor?.select(action.id);
+      render();
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'global-style-preview') {
+      styleEditor?.global(action.value);
+      render();
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'style-preview') {
+      if (view.editorOpen && !saving && !drawing) styleEditor?.preview(action.value, action.force);
+      render();
+      await saveDraft();
+      return;
+    }
+    if (
+      action.type === 'style-change' ||
+      action.type === 'style-step' ||
+      action.type === 'style-reset' ||
+      action.type === 'style-history'
+    ) {
+      if (!view.editorOpen || saving || drawing || !styleEditor) return;
+      if (
+        action.type === 'style-change' &&
+        !styleEditor.edit(action.property, action.value, action.linked)
+      ) {
+        message(msg('styleInvalid'));
+        return;
+      }
+      if (
+        action.type === 'style-step' &&
+        !styleEditor.step(action.property, action.direction, action.coarse, action.linked)
+      ) {
+        message(msg('styleInvalid'));
+        return;
+      }
+      if (action.type === 'style-reset') styleEditor.remove(action.property, action.linked);
+      if (action.type === 'style-history') styleEditor.history(action.direction);
+      editorVersion++;
+      render();
+      await saveDraft();
+      return;
+    }
     if (action.type === 'navigate-target') {
       await navigateTarget(action);
       return;
@@ -744,7 +957,20 @@ export async function createRuntime(
       return;
     }
     if (action.type === 'cancel-edit') {
-      resetEditor();
+      resetEditor(true);
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'close-edit') {
+      drawing?.abort();
+      view.editorOpen = false;
+      render();
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'open-edit') {
+      view.editorOpen = !!view.marker;
+      render();
       await saveDraft();
       return;
     }
@@ -757,6 +983,7 @@ export async function createRuntime(
       const ids = record.document.annotations.map((annotation) => annotation.id);
       render();
       try {
+        styleEditor?.discardAll();
         const next = await store.clearAnnotations(pageKey, pageUrl, ids);
         if (page === pageGeneration && !disposed) {
           if (version === editorVersion) resetEditor();
@@ -786,22 +1013,29 @@ export async function createRuntime(
         );
         if (editingId && !existing) {
           view.editingId = null;
+          view.editorSessionId = crypto.randomUUID();
           await saveDraft();
           message(msg('originalDeleted'));
           return;
         }
         const now = new Date().toISOString();
         const annotation: Annotation = AnnotationSchema.parse({
-          id: existing?.id || crypto.randomUUID(),
-          comment: draft,
+          id: existing?.id || view.editorSessionId || crypto.randomUUID(),
+          comment:
+            draft.trim() ||
+            (styleEditor && (styleEditor.state().count || styleEditor.state().dirty)
+              ? formatMessage(view.locale, msg('styleOnlyFeedback'))
+              : draft),
           createdAt: existing?.createdAt || now,
           updatedAt: now,
           page: submittedDraft.targetsAdjusted
             ? (submittedDraft.page ?? capturePage())
             : (existing?.page ?? selectionPage ?? capturePage()),
-          targets: submittedDraft.targetsAdjusted
-            ? submittedDraft.targets
-            : (existing?.targets ?? structuredClone(view.selected)),
+          targets: mergeStyleTargets(
+            submittedDraft.targetsAdjusted
+              ? submittedDraft.targets
+              : (existing?.targets ?? structuredClone(view.selected)),
+          ),
           ...(submittedDraft.targetsAdjusted
             ? submittedDraft.marker
               ? { marker: submittedDraft.marker }
@@ -817,7 +1051,15 @@ export async function createRuntime(
           replies: existing?.replies || [],
           ...(view.images.length ? { images: structuredClone(view.images) } : {}),
         });
-        await mutate({ id: crypto.randomUUID(), kind: 'upsert', annotation }, submittedDraft);
+        await mutate(
+          {
+            id: crypto.randomUUID(),
+            kind: 'upsert',
+            annotation,
+            styleLinks: styleEditor?.links() ?? {},
+          },
+          submittedDraft,
+        );
         if (page === pageGeneration && version === editorVersion) {
           resetEditor();
           await saveDraft();
@@ -834,8 +1076,21 @@ export async function createRuntime(
     const annotation = record.document.annotations.find((item) => item.id === action.id);
     if (!annotation) throw uiError('missingAnnotation');
     if (action.type === 'edit') {
+      if (view.editingId === annotation.id) {
+        view.editorOpen = true;
+        render();
+        await saveDraft();
+        return;
+      }
+      rememberEditor();
+      styleEditor?.begin(annotation.targets);
+      restoreEditingSelection(annotation.targets, annotation.id);
+      styleEditor?.begin(view.selected, true);
+      restoreEditorPresentation(annotation.id);
       editorVersion++;
-      view.targetsAdjusted = false;
+      view.targetsAdjusted = view.selected.some(
+        (target) => !annotation.targets.some((saved) => saved.id === target.id),
+      );
       view.message = '';
       delete view.messageDescriptor;
       view.editingId = annotation.id;
@@ -843,9 +1098,7 @@ export async function createRuntime(
       view.images = structuredClone(annotation.images ?? []);
       view.marker = annotation.marker ?? fallbackAnchor(annotation.targets);
       view.editorOpen = true;
-      view.selected = structuredClone(annotation.targets);
       selectionPage = annotation.page;
-      selection.setTargets(annotation.targets);
       updateAvailability();
       render();
       await saveDraft();
@@ -871,6 +1124,7 @@ export async function createRuntime(
     projectRecovery?.abort();
     preferences.destroy();
     disposed = true;
+    styleEditor?.destroy();
     drawing?.abort();
     for (const url of imageUrls.values()) URL.revokeObjectURL(url);
     imageUrls.clear();
@@ -890,6 +1144,10 @@ export async function createRuntime(
   signal.addEventListener('abort', destroy, { once: true });
   function reconcilePage() {
     if (location.href === pageUrl || disposed) return false;
+    styleEditor?.reset();
+    editorViews = {};
+    view.editorSessionId = '';
+    view.editorPosition = null;
     drawing?.abort();
     pageUrl = location.href;
     pageKey = keyFor(pageUrl);
@@ -931,6 +1189,8 @@ export async function createRuntime(
   window.addEventListener('popstate', reconcilePage, { signal });
   window.addEventListener('hashchange', reconcilePage, { signal });
   navigation = setInterval(reconcilePage, 500);
+  window.addEventListener('pagehide', () => styleEditor?.suspend(), { signal });
+  window.addEventListener('pageshow', () => styleEditor?.resume(), { signal });
   return {
     getDocument(): FeedbackDocument | null {
       reconcilePage();

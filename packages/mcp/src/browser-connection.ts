@@ -38,7 +38,10 @@ export function createBrowserConnection(options: {
         signal: AbortSignal;
       },
     ): Promise<Response> {
-      if (!/^\/sessions\/[a-f0-9-]+\/(sync|events|images\/[a-f0-9-]+)$/i.test(path))
+      if (
+        !(path === '/health' && request.method === 'GET') &&
+        !/^\/sessions\/[a-f0-9-]+\/(sync|events|images\/[a-f0-9-]+)$/i.test(path)
+      )
         throw new ProjectError('Invalid browser proxy path');
       request.signal.throwIfAborted();
       const connection = await leases.get();

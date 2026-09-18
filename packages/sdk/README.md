@@ -15,6 +15,22 @@ Lit is provided by the SDK; hosts do not need to configure a rendering framework
 Feedback is saved locally. Screenshots require browser authorization; existing
 PNG/JPEG/WebP images can also be pasted, dropped or selected.
 
+The feedback popover includes a Styles tab for editing common CSS properties with
+live preview, separately grouped padding/margin with all-side, axis and individual
+controls, numeric wheel/keyboard adjustment, undo/redo and
+per-property reset. `document.targetStyles` owns the shared original/desired values;
+markers reference targets and expose derived `styleChanges` for compatibility.
+Same-element markers edit the same draft. Multi-target markers default to batch
+editing, with mixed values, relative stepping and atomic undo. The toolbar controls
+global preview; local switches include/exclude the current targets. Saving and
+closing keep the page preview; cancellation restores committed shared values.
+Navigation and unmount remove all overrides. Drifted host styles require explicit
+confirmation, and host writes are preserved when removing overrides. The last
+marker referencing a target owns cleanup of that target's shared suggestions.
+All Markdown levels, JSON/ZIP exports and MCP retain style suggestions. Older MCP
+services must be updated and restarted; incompatible synchronization pauses with
+local data retained.
+
 Captured targets use uniquely verified CSS selectors: descriptive IDs, test IDs,
 attributes and classes, followed by ancestor scopes and positional fallbacks.
 Search is bounded to 256 candidate queries plus a final exact-path validation.
@@ -26,8 +42,13 @@ Small per-target arrows in the editor select a parent or return along the path
 just traversed. They preserve draft text and attachments, keep the marker anchor
 in place, and work independently for multiple targets. Editing a saved annotation
 only replaces its targets on Save; Cancel leaves the original annotation intact.
-Adjusted draft targets survive remounting, while the temporary back-navigation
-history lasts only for the current editing session.
+Adjusted drafts and each selection item's back-navigation path are retained in
+the local marker editor context across save/reopen/remount. Related style targets
+remain in the feedback document, but do not become additional selection rows just
+because a navigation path touched them. Explicit multi-selection stays parallel.
+Recorded paths are restored only for a compatible target set, and live identity
+and parent relationships are checked before returning to a child. Older records
+without navigation metadata retain their existing target list.
 
 Restoration still checks target identity; a unique match is not proof of identity
 after arbitrary page changes. New image snapshots also check captured `alt` and

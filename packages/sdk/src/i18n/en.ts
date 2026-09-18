@@ -1,4 +1,6 @@
+import { styleEn } from './styles';
 export const en = {
+  ...styleEn,
   settings: 'Settings',
   language: 'Language',
   theme: 'Theme',

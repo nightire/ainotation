@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing, type PropertyValues } from 'lit';
-import { Copy, createElement, Download, Settings, Trash2, X, Sun, Moon } from 'lucide';
+import { Copy, createElement, Download, Settings, Trash2, X, Sun, Moon, Eye, EyeOff } from 'lucide';
 import { themeStyles } from './theme';
 import { logoMark } from './logo';
 import { messages, locales, languageNames, isLocale, formatMessage } from '../i18n';
@@ -37,6 +37,20 @@ export class InspectorShell extends LitElement {
 
   static override styles = css`
     ${themeStyles}
+    .icon[aria-checked='true'] {
+      background: var(--ain-selected);
+    }
+    .launcher[data-preview='true']::after {
+      content: '';
+      position: absolute;
+      right: 3px;
+      top: 3px;
+      width: 7px;
+      height: 7px;
+      border: 1px solid var(--ain-on-accent);
+      border-radius: 50%;
+      background: var(--ain-accent);
+    }
     :host {
       position: fixed;
       right: 16px;
@@ -747,6 +761,7 @@ export class InspectorShell extends LitElement {
     return html`
       <button
         class="launcher"
+        data-preview=${String(view.styleEditor.globalPreview && view.styleEditor.globalCount > 0)}
         type="button"
         aria-label=${m.openInspector}
         title=${m.shortcut(m.openInspector, 'Option/Alt + Shift + A')}
@@ -795,6 +810,18 @@ export class InspectorShell extends LitElement {
             @click=${() => this.onaction({ type: 'export' })}
           >
             ${icon(Download)}
+          </button>
+          <button
+            class="icon"
+            type="button"
+            role="switch"
+            aria-label=${m.styleGlobalPreview}
+            title=${m.styleGlobalHint(view.styleEditor.globalCount)}
+            aria-checked=${String(view.styleEditor.globalPreview)}
+            ?disabled=${view.storage === 'loading'}
+            @click=${() => this.onaction({ type: 'global-style-preview', value: !view.styleEditor.globalPreview })}
+          >
+            ${icon(view.styleEditor.globalPreview ? Eye : EyeOff)}
           </button>
           <button
             class="icon"

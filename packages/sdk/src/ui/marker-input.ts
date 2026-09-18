@@ -54,6 +54,7 @@ export function bindMarkerEvents(options: {
     'pointerup',
     'pointermove',
     'pointercancel',
+    'lostpointercapture',
     'pointerover',
     'pointerout',
     'pointerenter',

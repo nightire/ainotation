@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { FeedbackImagesSchema, imageFilename } from './images';
+import { StyleChangesSchema } from './styles';
 export * from './images';
+export * from './styles';
 
 export const FEEDBACK_SCHEMA_VERSION = 1;
 
@@ -30,6 +32,8 @@ export const TargetSnapshotSchema = z.object({
   attributes: z.record(z.string().max(100), z.string().max(1000)),
   rect: RectSchema,
   styles: z.record(z.string().max(100), z.string().max(1000)),
+  styleChanges: StyleChangesSchema.optional(),
+  styleTargetId: z.uuid().optional(),
   states: z.object({ focused: z.boolean(), focusWithin: z.boolean() }).optional(),
   label: z.string().max(160).optional(),
   ancestors: z.array(DomContextNodeSchema).max(32).optional(),
@@ -99,6 +103,7 @@ export const FeedbackDocumentSchema = z.object({
   url: z.url().max(8000),
   createdAt: z.iso.datetime(),
   annotations: z.array(AnnotationSchema).max(1000),
+  targetStyles: z.record(z.uuid(), StyleChangesSchema).optional(),
 });
 
 // Public annotation handoff omits the conversation retained in persistent storage.
@@ -110,7 +115,65 @@ export type AnnotationContent = z.infer<typeof AnnotationContentSchema>;
 export type FeedbackExport = z.infer<typeof FeedbackExportSchema>;
 
 export function feedbackExport(document: FeedbackDocument): FeedbackExport {
-  return FeedbackExportSchema.parse(document);
+  return FeedbackExportSchema.parse(normalizeSharedStyles(document));
+}
+
+export const styleTargetKey = (target: TargetSnapshot) => target.styleTargetId ?? target.id;
+
+/** targetStyles is authoritative; inline styleChanges are compatibility projections.
+ * Only explicit mutation inputs may change the shared record. Read-time projection
+ * cannot resurrect stale styles from another marker's captured target snapshot.
+ */
+export function normalizeSharedStyles(
+  document: FeedbackDocument,
+  updates: TargetSnapshot[] = [],
+  links: Record<string, string> = {},
+): FeedbackDocument {
+  const next = structuredClone(document);
+  const shared = structuredClone(next.targetStyles ?? {});
+  if (!next.targetStyles)
+    for (const annotation of [...next.annotations].sort((a, b) =>
+      a.updatedAt.localeCompare(b.updatedAt),
+    ))
+      for (const target of annotation.targets)
+        if (target.styleChanges?.length) {
+          const key = styleTargetKey(target);
+          shared[key] = [
+            ...new Map(
+              [...(shared[key] ?? []), ...structuredClone(target.styleChanges)].map((change) => [
+                change.property,
+                change,
+              ]),
+            ).values(),
+          ];
+        }
+  const aliases = new Map([
+    ...Object.entries(links),
+    ...updates.map((target) => [target.id, styleTargetKey(target)] as const),
+  ]);
+  for (const [id, key] of aliases) if (shared[id] && !shared[key]) shared[key] = shared[id]!;
+  for (const target of updates) {
+    const key = styleTargetKey(target);
+    if (key !== target.id && shared[target.id] && !shared[key]) shared[key] = shared[target.id]!;
+    if (target.styleChanges !== undefined) shared[key] = structuredClone(target.styleChanges);
+  }
+  const referenced = new Set<string>();
+  for (const annotation of next.annotations)
+    for (const target of annotation.targets) {
+      const alias = aliases.get(target.id);
+      if (alias && alias !== target.id) target.styleTargetId = alias;
+      else if (alias) delete target.styleTargetId;
+      const key = styleTargetKey(target);
+      referenced.add(key);
+      delete target.styleChanges;
+      if (shared[key]?.length) target.styleChanges = structuredClone(shared[key]);
+    }
+  const retained = Object.fromEntries(
+    Object.entries(shared).filter(([key, changes]) => referenced.has(key) && changes.length),
+  );
+  if (Object.keys(retained).length) next.targetStyles = retained;
+  else delete next.targetStyles;
+  return next;
 }
 
 export function feedbackExportJsonSchema() {
@@ -118,7 +181,12 @@ export function feedbackExportJsonSchema() {
 }
 
 export const FeedbackOperationSchema = z.discriminatedUnion('kind', [
-  z.object({ id: z.uuid(), kind: z.literal('upsert'), annotation: AnnotationSchema }),
+  z.object({
+    id: z.uuid(),
+    kind: z.literal('upsert'),
+    annotation: AnnotationSchema,
+    styleLinks: z.record(z.uuid(), z.uuid()).optional(),
+  }),
   z.object({ id: z.uuid(), kind: z.literal('delete'), annotationId: z.uuid() }),
   z.object({
     id: z.uuid(),
@@ -157,6 +225,8 @@ export const SyncResponseSchema = z
   .object({
     document: FeedbackDocumentSchema,
     acknowledged: z.array(z.uuid()),
+    styleSuggestions: z.literal(true).optional(),
+    sharedStyles: z.literal(true).optional(),
     storageEpoch: z.uuid().optional(),
     missingImages: z.array(z.uuid()).optional(),
     recovery: z.object({ revision: z.string().regex(/^[a-f0-9]{64}$/) }).optional(),
@@ -204,13 +274,18 @@ export function applyFeedbackOperation(
   } else if (annotation && operation.kind === 'reopen') {
     annotation.status = 'pending';
   }
-  return next;
+  return normalizeSharedStyles(
+    next,
+    operation.kind === 'upsert' ? operation.annotation.targets : [],
+    operation.kind === 'upsert' ? operation.styleLinks : undefined,
+  );
 }
 
 export function feedbackMarkdown(
   document: FeedbackDocument,
   options: { includeConversation?: boolean; detail?: OutputDetail } = {},
 ): string {
+  document = normalizeSharedStyles(document);
   const detail = options.detail ?? 'standard';
   const detailed = detail === 'detailed' || detail === 'forensic';
   const forensic = detail === 'forensic';
@@ -239,13 +314,21 @@ export function feedbackMarkdown(
         return `${node.tagName}${identifier}${boundary}`;
       })
       .join(' > ');
+  const emittedStyles = new Set<string>();
+  const styleNotes = (target: TargetSnapshot) => {
+    if (!target.styleChanges?.length) return '';
+    const key = styleTargetKey(target);
+    if (emittedStyles.has(key)) return `Style suggestions: shared target ${key} (see above).`;
+    emittedStyles.add(key);
+    return `Style suggestions for ${JSON.stringify(target.selector)} (shared target ${key}; previewed at the recorded viewport; implement using the project's existing styles):\n${target.styleChanges.map((change) => `- ${change.property}: ${JSON.stringify(change.before)} → ${JSON.stringify(change.value)}`).join('\n')}`;
+  };
   return [
     `# Page feedback`,
     `Page: ${document.url}`,
     ...(forensic ? [`Session: ${document.id}`] : []),
     ...document.annotations.map((annotation, index) =>
       detail === 'compact'
-        ? `${index + 1}. ${annotation.targets.map(compactTarget).join('; ')}\n${quote(annotation.comment)}${annotation.images?.length ? `\nImages: ${annotation.images.map(imageFilename).join(', ')}` : ''}`
+        ? `${index + 1}. ${annotation.targets.map(compactTarget).join('; ')}\n${quote(annotation.comment)}${annotation.images?.length ? `\nImages: ${annotation.images.map(imageFilename).join(', ')}` : ''}${annotation.targets.some((target) => target.styleChanges?.length) ? `\n${annotation.targets.map(styleNotes).filter(Boolean).join('\n')}` : ''}`
         : [
             `## ${index + 1}. ${options.includeConversation ? annotation.status : 'Annotation'} (${annotation.id})`,
             `Page: ${annotation.page.url}`,
@@ -273,6 +356,7 @@ export function feedbackMarkdown(
               [
                 `### Target ${targetIndex + 1}`,
                 `Selector: ${JSON.stringify(target.selector)}`,
+                ...(target.styleChanges?.length ? [styleNotes(target)] : []),
                 ...(target.shadowHosts.length
                   ? [`Shadow hosts: ${JSON.stringify(target.shadowHosts)}`]
                   : []),

@@ -23,6 +23,7 @@ import { getViewport } from './position';
 import { messages } from '../i18n';
 import { bindMarkerEvents } from './marker-input';
 import { targetDescription, targetLocatorText } from './target-description';
+import { createStylePanel, stylePanelStyles } from './style-panel';
 
 type Rect = TargetSnapshot['rect'];
 type Options = {
@@ -32,6 +33,7 @@ type Options = {
 
 const styles = css`
   ${themeStyles}
+  ${stylePanelStyles}
   * {
     box-sizing: border-box;
   }
@@ -134,6 +136,30 @@ const styles = css`
     overflow: auto;
     overscroll-behavior: contain;
     pointer-events: auto;
+    cursor: grab;
+  }
+  .popover input,
+  .popover textarea,
+  .popover select,
+  .popover .style-input {
+    cursor: auto;
+  }
+  .popover code,
+  .popover pre,
+  .popover q {
+    cursor: text;
+  }
+  .popover label {
+    cursor: pointer;
+  }
+  .popover.dragging,
+  .popover.dragging * {
+    cursor: grabbing !important;
+    user-select: none;
+  }
+  .popover:focus-visible {
+    outline: 2px solid var(--ain-focus);
+    outline-offset: 2px;
   }
   .target-list {
     list-style: none;
@@ -368,6 +394,63 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
   let editorId: string | null = null;
   let annotationIds = new Set<string>();
   const abort = new AbortController();
+  let lockedPosition: { x: number; y: number } | null = null;
+  let drag: {
+    panel: HTMLElement;
+    id: number;
+    x: number;
+    y: number;
+    left: number;
+    top: number;
+    moved: boolean;
+    cancelled: boolean;
+  } | null = null;
+  let dragClick: { x: number; y: number; time: number } | null = null;
+  const interactive =
+    'input, textarea, select, button, option, label, summary, a, area, code, pre, q, .style-input, [contenteditable]:not([contenteditable="false"]), [draggable="true"], [tabindex]:not([tabindex="-1"]), [role="button"], [role="checkbox"], [role="switch"], [role="radio"], [role="tab"], [role="slider"], [role="spinbutton"], [role="combobox"], [role="listbox"], [role="menuitem"], [role="link"]';
+  function finishDrag(persist: boolean) {
+    const current = drag;
+    drag = null;
+    if (!current) return;
+    current.panel.classList.remove('dragging');
+    if (current.panel.hasPointerCapture(current.id))
+      current.panel.releasePointerCapture(current.id);
+    if (persist && current.moved && !current.cancelled && current.panel.isConnected) {
+      const rect = current.panel.getBoundingClientRect();
+      onAction({ type: 'editor-position', position: { x: rect.x, y: rect.y } });
+    }
+  }
+  function dragSurface(target: Element, event: PointerEvent) {
+    const panel = target.closest<HTMLElement>('.popover');
+    if (!panel || (target.closest(interactive) && target.closest(interactive) !== panel))
+      return null;
+    for (let node: Element | null = target; node; node = node.parentElement) {
+      if (node instanceof HTMLElement) {
+        const rect = node.getBoundingClientRect();
+        // Keep native scrollbar dragging and touch scrolling available.
+        if (
+          node.scrollHeight > node.clientHeight &&
+          (event.pointerType === 'touch' ||
+            event.clientX >= rect.left + node.clientLeft + node.clientWidth)
+        )
+          return null;
+        if (
+          node.scrollWidth > node.clientWidth &&
+          event.clientY >= rect.top + node.clientTop + node.clientHeight
+        )
+          return null;
+      }
+      if (node === panel) break;
+    }
+    return panel;
+  }
+  const stylePanel = createStylePanel(
+    () => view,
+    (action) => onAction(action),
+    () => {
+      if (view && !destroyed) layer.update(view, visible);
+    },
+  );
   const observedElements = new Set<Element>();
   const observedRoots = new Set<Document | ShadowRoot>();
 
@@ -476,8 +559,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     }
 
     const { left, top, width, height } = getViewport();
-    let active =
-      view.editorOpen && !view.editingId && view.marker ? point(view.marker, view.selected) : null;
+    let active = !view.editingId && view.marker ? point(view.marker, view.selected) : null;
     const positions = new Map(
       annotations.map((annotation) => [
         annotation.id,
@@ -517,8 +599,12 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       const size = popover.getBoundingClientRect();
       const x = active?.x ?? left + 8;
       const y = active?.y ?? top + 8;
-      const preferredX = x + 18 + size.width > left + width - 8 ? x - 18 - size.width : x + 18;
-      const preferredY = y + 18 + size.height > top + height - 8 ? y - 18 - size.height : y + 18;
+      const preferredX =
+        lockedPosition?.x ??
+        (x + 18 + size.width > left + width - 8 ? x - 18 - size.width : x + 18);
+      const preferredY =
+        lockedPosition?.y ??
+        (y + 18 + size.height > top + height - 8 ? y - 18 - size.height : y + 18);
       popover.style.left = `${Math.max(left + 8, Math.min(preferredX, left + width - size.width - 8))}px`;
       popover.style.top = `${Math.max(top + 8, Math.min(preferredY, top + height - size.height - 8))}px`;
     }
@@ -555,6 +641,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     if (button.disabled || !view) return;
     if (button.classList.contains('marker')) {
       if (button.dataset.annotationId) onAction({ type: 'edit', id: button.dataset.annotationId });
+      else if (!view.editorOpen) onAction({ type: 'open-edit' });
       else shadow.querySelector('textarea')?.focus({ preventScroll: true });
       return;
     }
@@ -596,6 +683,107 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     active: () => visible && !destroyed,
     passthrough: () => !!view?.passthrough,
     handle(event, target) {
+      if (drag && (event.type === 'touchstart' || event.type === 'touchmove')) {
+        event.preventDefault();
+        return;
+      }
+      if (
+        drag &&
+        event instanceof KeyboardEvent &&
+        event.type === 'keydown' &&
+        event.key === 'Escape'
+      ) {
+        event.preventDefault();
+        drag.cancelled = true;
+        lockedPosition = { x: drag.left, y: drag.top };
+        position();
+        return;
+      }
+      if (drag && event instanceof PointerEvent && event.pointerId === drag.id) {
+        if (event.type === 'pointermove') {
+          event.preventDefault();
+          if (event.pointerType === 'mouse' && event.buttons === 0) {
+            finishDrag(true);
+            return;
+          }
+          if (drag.cancelled) return;
+          if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 3) return;
+          drag.moved = true;
+          drag.panel.classList.add('dragging');
+          lockedPosition = {
+            x: drag.left + event.clientX - drag.x,
+            y: drag.top + event.clientY - drag.y,
+          };
+          position();
+          return;
+        }
+        if (
+          event.type === 'pointerup' ||
+          event.type === 'pointercancel' ||
+          event.type === 'lostpointercapture'
+        ) {
+          if (event.type === 'pointerup' && drag.moved)
+            dragClick = { x: event.clientX, y: event.clientY, time: performance.now() };
+          finishDrag(true);
+          return;
+        }
+      }
+      if (event.type === 'click' && event instanceof MouseEvent && dragClick) {
+        const previous = dragClick;
+        dragClick = null;
+        if (
+          event.detail > 0 &&
+          performance.now() - previous.time < 500 &&
+          Math.hypot(event.clientX - previous.x, event.clientY - previous.y) < 6
+        ) {
+          event.preventDefault();
+          return;
+        }
+      }
+      if (
+        !drag &&
+        event instanceof PointerEvent &&
+        event.type === 'pointerdown' &&
+        event.button === 0 &&
+        event.isPrimary &&
+        !view?.saving
+      ) {
+        const panel = dragSurface(target, event);
+        if (panel) {
+          event.preventDefault();
+          const rect = panel.getBoundingClientRect();
+          drag = {
+            panel,
+            id: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+            left: rect.x,
+            top: rect.y,
+            moved: false,
+            cancelled: false,
+          };
+          panel.setPointerCapture(event.pointerId);
+          return;
+        }
+      }
+      if (stylePanel.handle(event, target)) return;
+      if (
+        target.matches('.popover') &&
+        event instanceof KeyboardEvent &&
+        event.type === 'keydown' &&
+        event.key.startsWith('Arrow')
+      ) {
+        event.preventDefault();
+        const rect = shadow.querySelector('.popover')!.getBoundingClientRect();
+        lockedPosition = {
+          x: rect.x + (event.key === 'ArrowRight' ? 16 : event.key === 'ArrowLeft' ? -16 : 0),
+          y: rect.y + (event.key === 'ArrowDown' ? 16 : event.key === 'ArrowUp' ? -16 : 0),
+        };
+        position();
+        const moved = shadow.querySelector('.popover')!.getBoundingClientRect();
+        onAction({ type: 'editor-position', position: { x: moved.x, y: moved.y } });
+        return;
+      }
       if (event.type === 'click') {
         const button = target.closest('button');
         if (button) activate(button);
@@ -605,11 +793,9 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
           event.preventDefault();
           onAction({ type: 'cancel-edit' });
         } else if (
-          target instanceof HTMLTextAreaElement &&
           event.key === 'Enter' &&
-          event.metaKey &&
+          event.metaKey !== event.ctrlKey &&
           !event.altKey &&
-          !event.ctrlKey &&
           !event.shiftKey
         ) {
           event.preventDefault();
@@ -645,14 +831,16 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       }
     },
   });
+  window.addEventListener('blur', () => finishDrag(true), { signal: abort.signal });
   document.addEventListener('scroll', schedule, { capture: true, signal: abort.signal });
   window.addEventListener('resize', schedule, { signal: abort.signal });
   window.visualViewport?.addEventListener('resize', schedule, { signal: abort.signal });
   window.visualViewport?.addEventListener('scroll', schedule, { signal: abort.signal });
 
-  return {
-    update(next, nextVisible) {
+  const layer = {
+    update(next: InspectorViewState, nextVisible: boolean) {
       if (destroyed) return;
+      if (!nextVisible || next.passthrough) finishDrag(false);
       host.dataset.theme = next.theme;
       host.lang = next.locale;
       const m = messages(next.locale);
@@ -674,19 +862,28 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       host.style.setProperty('display', visible ? 'block' : 'none', 'important');
       const annotations = next.document?.annotations ?? [];
       const editorTargets =
-        next.editingId && !next.targetsAdjusted
+        next.editingId && !next.targetsAdjusted && !next.editorSessionId
           ? (annotations.find((annotation) => annotation.id === next.editingId)?.targets ??
             next.selected)
           : next.selected;
       const open = next.editorOpen && Boolean(next.editingId || next.marker);
       const key = open
-        ? (next.editingId ??
+        ? next.editingId ||
+          next.editorSessionId ||
           (next.targetsAdjusted && editorKey
             ? editorKey
-            : JSON.stringify([next.selected.map((target) => target.id), next.marker])))
+            : JSON.stringify([next.selected.map((target) => target.id), next.marker]))
         : null;
       const focusEditor = visible && key !== null && key !== editorKey;
       const closedEditor = editorKey !== null && key === null;
+      if (key !== editorKey) {
+        stylePanel.reset();
+        lockedPosition = next.editorPosition ? { ...next.editorPosition } : null;
+        finishDrag(false);
+      } else if (!lockedPosition && (next.editorTab === 'styles' || next.styleEditor.count)) {
+        const rect = shadow.querySelector('.popover')?.getBoundingClientRect();
+        if (rect) lockedPosition = { x: rect.x, y: rect.y };
+      }
       editorKey = key;
       editorId = open ? next.editingId : null;
       render(
@@ -713,7 +910,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
               `,
             )}
             ${
-              open && !next.editingId && next.marker
+              !next.editingId && next.marker
                 ? html`
                     <button class="marker" type="button" aria-label=${m.newAnnotation}>
                       ${createElement(Plus, { 'aria-hidden': 'true', focusable: 'false' })}
@@ -727,6 +924,9 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                     <section
                       class="popover"
                       role="dialog"
+                      tabindex="0"
+                      aria-description=${m.styleMovePanel}
+                      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
                       aria-label=${next.editingId ? m.editFeedback : m.newFeedback}
                     >
                       <ul class="target-list" aria-label=${m.selectedElements}>
@@ -766,51 +966,60 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                             </li>`,
                         )}
                       </ul>
-                      <textarea
-                        aria-label=${m.feedbackContent}
-                        aria-keyshortcuts="Meta+Enter"
-                        rows="3"
-                        maxlength="10000"
-                        .value=${next.draft}
-                        ?disabled=${next.storage === 'loading'}
-                      ></textarea>
-                      <div class="images" aria-label=${m.attachedImages}>
-                        ${next.images.map(
-                          (image, index) => html`<div class="image">
-                            <button
-                              class="image-preview"
-                              type="button"
-                              aria-label=${m.editImage(index + 1)}
-                              ?disabled=${!next.imageUrls[image.id]}
-                              data-action="edit-image"
-                              data-image-id=${image.id}
-                            >
-                              ${next.imageUrls[image.id] ? html`<img src=${next.imageUrls[image.id]} alt=${m.attachedImage(index + 1)} />` : m.image(index + 1)}
-                            </button>
-                            <button
-                              class="image-action image-download"
-                              type="button"
-                              aria-label=${m.downloadImageNumber(index + 1)}
-                              title=${m.downloadImage}
-                              ?disabled=${!next.imageUrls[image.id]}
-                              data-action="download-image"
-                              data-image-id=${image.id}
-                            >
-                              ${createElement(Download, { 'aria-hidden': 'true' })}
-                            </button>
-                            <button
-                              class="image-action image-remove"
-                              type="button"
-                              aria-label=${m.removeImageNumber(index + 1)}
-                              title=${m.removeImage}
-                              data-action="remove-image"
-                              data-image-id=${image.id}
-                            >
-                              ${createElement(Trash2, { 'aria-hidden': 'true' })}
-                            </button>
-                          </div>`,
-                        )}
+                      ${stylePanel.tabs(next)}
+                      <div
+                        id="ain-feedback-panel"
+                        role="tabpanel"
+                        aria-labelledby="ain-feedback-tab"
+                        ?hidden=${next.editorTab !== 'feedback'}
+                      >
+                        <textarea
+                          aria-label=${m.feedbackContent}
+                          aria-keyshortcuts="Meta+Enter"
+                          rows="3"
+                          maxlength="10000"
+                          .value=${next.draft}
+                          ?disabled=${next.storage === 'loading'}
+                        ></textarea>
+                        <div class="images" aria-label=${m.attachedImages}>
+                          ${next.images.map(
+                            (image, index) => html`<div class="image">
+                              <button
+                                class="image-preview"
+                                type="button"
+                                aria-label=${m.editImage(index + 1)}
+                                ?disabled=${!next.imageUrls[image.id]}
+                                data-action="edit-image"
+                                data-image-id=${image.id}
+                              >
+                                ${next.imageUrls[image.id] ? html`<img src=${next.imageUrls[image.id]} alt=${m.attachedImage(index + 1)} />` : m.image(index + 1)}
+                              </button>
+                              <button
+                                class="image-action image-download"
+                                type="button"
+                                aria-label=${m.downloadImageNumber(index + 1)}
+                                title=${m.downloadImage}
+                                ?disabled=${!next.imageUrls[image.id]}
+                                data-action="download-image"
+                                data-image-id=${image.id}
+                              >
+                                ${createElement(Download, { 'aria-hidden': 'true' })}
+                              </button>
+                              <button
+                                class="image-action image-remove"
+                                type="button"
+                                aria-label=${m.removeImageNumber(index + 1)}
+                                title=${m.removeImage}
+                                data-action="remove-image"
+                                data-image-id=${image.id}
+                              >
+                                ${createElement(Trash2, { 'aria-hidden': 'true' })}
+                              </button>
+                            </div>`,
+                          )}
+                        </div>
                       </div>
+                      ${next.editorTab === 'styles' ? stylePanel.body(next) : nothing}
                       <div class="actions">
                         <button
                           type="button"
@@ -818,6 +1027,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           title=${m.screenshotHint}
                           ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
                           data-action="screenshot"
+                          ?hidden=${next.editorTab !== 'feedback'}
                         >
                           ${createElement(Camera, { 'aria-hidden': 'true', focusable: 'false' })}
                         </button>
@@ -827,6 +1037,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           title=${m.chooseImage}
                           ?disabled=${next.saving || next.storage === 'loading' || next.images.length >= 8}
                           data-action="choose-image"
+                          ?hidden=${next.editorTab !== 'feedback'}
                         >
                           ${createElement(ImagePlus, { 'aria-hidden': 'true', focusable: 'false' })}
                         </button>
@@ -846,7 +1057,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                             aria-label=${next.editingId ? m.save : m.add}
                             title=${m.shortcut(next.editingId ? m.save : m.add, 'Command/Super + Enter')}
                             aria-keyshortcuts="Meta+Enter"
-                            ?disabled=${!next.draft.trim() || next.saving || next.storage === 'loading'}
+                            ?disabled=${(!next.draft.trim() && !next.styleEditor.count && !next.styleEditor.dirty) || stylePanel.invalid() || next.saving || next.storage === 'loading'}
                             data-action="save"
                           >
                             ${createElement(Check, { 'aria-hidden': 'true', focusable: 'false' })}
@@ -867,7 +1078,10 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           }
                         </div>
                       </div>
-                      <p class="import-hint">${m.pasteImage}</p>
+                      <p class="import-hint" ?hidden=${next.editorTab !== 'feedback'}>
+                        ${m.pasteImage}
+                      </p>
+                      ${next.styleEditor.count || next.styleEditor.dirty ? html`<p class="style-note">${m.styleRestoreOnSave}</p>` : nothing}
                       ${next.message ? html`<p class="message" role="status">${next.message}</p>` : nothing}
                     </section>
                   `
@@ -887,9 +1101,15 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
             row?.querySelector<HTMLButtonElement>('.target-tools button, .copy-selector');
           button?.focus({ preventScroll: true });
         } else if (focusEditor) {
-          const textarea = shadow.querySelector('textarea');
-          textarea?.focus({ preventScroll: true });
-          textarea?.setSelectionRange(next.draft.length, next.draft.length);
+          if (next.editorTab === 'styles')
+            shadow
+              .querySelector<HTMLElement>('[data-style-property]')
+              ?.focus({ preventScroll: true });
+          else {
+            const textarea = shadow.querySelector('textarea');
+            textarea?.focus({ preventScroll: true });
+            textarea?.setSelectionRange(next.draft.length, next.draft.length);
+          }
         } else if ((closedEditor && hadEditorFocus) || focusedId) {
           const id = closedEditor
             ? (previousEditorId ??
@@ -912,6 +1132,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     },
     destroy() {
       if (destroyed) return;
+      finishDrag(false);
       destroyed = true;
       abort.abort();
       resize.disconnect();
@@ -931,4 +1152,5 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       getRect = () => null;
     },
   };
+  return layer;
 }

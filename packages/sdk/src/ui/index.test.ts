@@ -200,20 +200,22 @@ describe('Inspector shell', () => {
       expect(shell.view.document).toEqual(before);
     }
   });
-  it('renders exactly five ordered toolbar actions and disables clear when empty or busy', async () => {
+  it('renders the global preview switch with existing toolbar actions and disables clear when empty or busy', async () => {
     const shell = await mount();
     const buttons = [...shell.shadowRoot!.querySelectorAll<HTMLButtonElement>('header button')];
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Copy feedback',
       'Export JSON',
+      'Preview all changes',
       'Clear all annotations',
       'Settings',
       'Close inspector',
     ]);
     expect(shell.getBoundingClientRect().height).toBe(52);
-    expect(control(shell, '.separator').nextElementSibling).toBe(buttons[4]);
+    expect(control(shell, '.separator').nextElementSibling).toBe(buttons[5]);
+    expect(buttons[2]!.getAttribute('aria-checked')).toBe('true');
     const actions = actionsFrom(shell);
-    buttons[2]!.click();
+    buttons[3]!.click();
     expect(actions).toEqual([{ type: 'clear-all' }]);
     shell.view = {
       ...shell.view,
@@ -221,13 +223,13 @@ describe('Inspector shell', () => {
       document: { ...shell.view.document!, annotations: [] },
     };
     await shell.updateComplete;
-    expect(buttons[2]!.disabled).toBe(true);
+    expect(buttons[3]!.disabled).toBe(true);
     shell.view = { ...shell.view, draft: 'Draft only' };
     await shell.updateComplete;
-    expect(buttons[2]!.disabled).toBe(false);
+    expect(buttons[3]!.disabled).toBe(false);
     shell.view = { ...shell.view, saving: true };
     await shell.updateComplete;
-    expect(buttons[2]!.disabled).toBe(true);
+    expect(buttons[3]!.disabled).toBe(true);
   });
 
   it('dismisses settings with Escape or an outside pointer without discarding inputs or closing Inspector', async () => {

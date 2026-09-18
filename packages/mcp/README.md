@@ -25,6 +25,18 @@ Use `ainotation_get_image` to read an attachment by its session and image IDs.
 See the [project documentation](https://github.com/nightire/ainotation#readme) for
 the complete CLI, tool list and legacy manual pairing options.
 
+## Shared style suggestions
+
+Feedback includes `targetStyles`, keyed by target identity. Markers reference the
+same record through their target ID or `styleTargetId`; inline `styleChanges` are
+expanded projections for compatibility. Updating a target's `styleChanges` through
+annotation CRUD updates all markers sharing it. Use an empty array to remove that
+target's suggestions. Deleting a marker retains styles until the last reference
+is removed. Both `styleSuggestions` and `sharedStyles` are advertised in the
+authenticated `/health` response's `capabilities` and on sync responses. The SDK
+checks capabilities before sending style mutations, including through the Vite
+bridge, so older services cannot strip new data or consume pending operation IDs.
+
 ## License
 
 MIT licensed, free for personal and commercial use, including modification,

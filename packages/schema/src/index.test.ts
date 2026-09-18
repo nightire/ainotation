@@ -8,10 +8,134 @@ import {
   feedbackExport,
   feedbackExportJsonSchema,
   FeedbackImagesSchema,
+  StyleChangesSchema,
+  normalizeSharedStyles,
 } from './index';
 import type { Annotation } from './index';
 
 describe('feedback contract', () => {
+  it('keeps canonical target styles shared across marker mutations and removes only the last reference', () => {
+    const document = createFeedbackDocument('http://localhost/shared');
+    const target = {
+      id: crypto.randomUUID(),
+      selector: '#same',
+      shadowHosts: [],
+      tagName: 'button',
+      text: 'Same',
+      attributes: {},
+      styles: {},
+      rect: { x: 0, y: 0, width: 20, height: 20 },
+    };
+    const note = (id: string): Annotation => ({
+      id,
+      comment: id,
+      createdAt: document.createdAt,
+      updatedAt: document.createdAt,
+      page: {
+        url: document.url,
+        title: 'Shared',
+        viewport: { width: 800, height: 600, devicePixelRatio: 1, scrollX: 0, scrollY: 0 },
+      },
+      targets: [target],
+      status: 'pending',
+      replies: [],
+    });
+    const a = note(crypto.randomUUID()),
+      b = note(crypto.randomUUID());
+    document.annotations = [a, b];
+    const update = (value: string) => ({
+      ...a,
+      targets: [
+        { ...target, styleChanges: [{ property: 'padding-top' as const, before: '8px', value }] },
+      ],
+    });
+    let next = applyFeedbackOperation(document, {
+      id: crypto.randomUUID(),
+      kind: 'upsert',
+      annotation: update('20px'),
+    });
+    expect(Object.keys(next.targetStyles!)).toEqual([target.id]);
+    expect(next.annotations.map((item) => item.targets[0]!.styleChanges?.[0]?.value)).toEqual([
+      '20px',
+      '20px',
+    ]);
+    next.annotations[1]!.targets[0]!.styleChanges![0]!.value = '999px';
+    next = normalizeSharedStyles(next);
+    expect(next.annotations[1]!.targets[0]!.styleChanges![0]!.value).toBe('20px');
+    next = applyFeedbackOperation(next, {
+      id: crypto.randomUUID(),
+      kind: 'upsert',
+      annotation: { ...b, targets: [{ ...target, styleChanges: [] }] },
+    });
+    expect(next.targetStyles).toBeUndefined();
+    expect(next.annotations.every((item) => !item.targets[0]!.styleChanges)).toBe(true);
+    next = applyFeedbackOperation(next, {
+      id: crypto.randomUUID(),
+      kind: 'upsert',
+      annotation: update('24px'),
+    });
+    next = applyFeedbackOperation(next, {
+      id: crypto.randomUUID(),
+      kind: 'delete',
+      annotationId: a.id,
+    });
+    expect(next.targetStyles![target.id]![0]!.value).toBe('24px');
+    next = applyFeedbackOperation(next, {
+      id: crypto.randomUUID(),
+      kind: 'delete',
+      annotationId: b.id,
+    });
+    expect(next.targetStyles).toBeUndefined();
+  });
+  it('merges legacy non-overlapping declarations without trusting stale inline projections', () => {
+    const doc = createFeedbackDocument('http://localhost/legacy');
+    const id = crypto.randomUUID();
+    const target = {
+      id,
+      selector: 'button',
+      shadowHosts: [],
+      tagName: 'button',
+      text: '',
+      attributes: {},
+      styles: {},
+      rect: { x: 0, y: 0, width: 20, height: 20 },
+    };
+    const note = (value: Annotation['targets'][number]['styleChanges']): Annotation => ({
+      id: crypto.randomUUID(),
+      comment: 'legacy',
+      createdAt: doc.createdAt,
+      updatedAt: doc.createdAt,
+      page: {
+        url: doc.url,
+        title: '',
+        viewport: { width: 800, height: 600, devicePixelRatio: 1, scrollX: 0, scrollY: 0 },
+      },
+      targets: [{ ...target, styleChanges: value }],
+      status: 'pending',
+      replies: [],
+    });
+    doc.annotations = [
+      note([{ property: 'color', before: 'black', value: 'red' }]),
+      note([{ property: 'font-size', before: '14px', value: '18px' }]),
+    ];
+    const migrated = normalizeSharedStyles(doc);
+    expect(migrated.targetStyles![id]).toHaveLength(2);
+    expect(migrated.annotations[0]!.targets[0]!.styleChanges).toEqual(
+      migrated.annotations[1]!.targets[0]!.styleChanges,
+    );
+  });
+  it('validates bounded literal style suggestions and rejects duplicates', () => {
+    const change = { property: 'padding-top', before: '8px', value: '12px' };
+    expect(StyleChangesSchema.parse([change])).toEqual([change]);
+    for (const invalid of [
+      [change, change],
+      [{ ...change, property: 'background-image' }],
+      [{ ...change, value: 'url(https://example.com)' }],
+      [{ ...change, value: 'var(--x)' }],
+      [{ ...change, value: '1px; color:red' }],
+    ])
+      expect(StyleChangesSchema.safeParse(invalid).success).toBe(false);
+  });
   it('rejects oversized pixel dimensions and duplicate image IDs', () => {
     const image = {
       id: crypto.randomUUID(),
@@ -81,6 +205,14 @@ describe('feedback contract', () => {
       replies: [{ id: crypto.randomUUID(), role: 'agent', message: 'Aligned', createdAt: time }],
     };
     document.annotations.push(annotation);
+    annotation.targets[0]!.styleChanges = [
+      { property: 'padding-top', before: '8px', value: '12px' },
+    ];
+    for (const detail of ['compact', 'standard', 'detailed', 'forensic'] as const) {
+      const output = feedbackMarkdown(document, { detail });
+      expect(output).toContain('padding-top: "8px" → "12px"');
+      expect(output).toContain('recorded viewport');
+    }
     annotation.targets[0]!.ancestors = [{ tagName: 'main', attributes: { id: 'checkout' } }];
     annotation.targets[0]!.nearbyText = { before: 'Order summary', after: 'Shipping details' };
     annotation.targets[0]!.textSelection = {

@@ -1,6 +1,8 @@
 import type { Messages } from './en';
+import { styleZhHans } from './styles';
 
 export const zhHans = {
+  ...styleZhHans,
   settings: '设置',
   language: '语言',
   theme: '主题',

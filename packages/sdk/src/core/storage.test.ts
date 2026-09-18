@@ -8,6 +8,88 @@ import { canvasBlob, describeImage } from './images';
 const stores: DraftStore[] = [];
 const keys: string[] = [];
 
+it('persists bounded navigation slots while ignoring corrupt editor metadata without losing feedback', async () => {
+  const store = await openStore(),
+    key = pageKey(),
+    note = annotation('Navigation');
+  const child = note.targets[0]!,
+    parent = { ...child, id: crypto.randomUUID(), selector: '#parent', tagName: 'section' };
+  note.targets = [parent, child];
+  const navigation = {
+    referenceIds: [parent.id, child.id],
+    slots: [{ target: parent, history: [child] }],
+  };
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    document: { ...record.document, annotations: [note] },
+    editorViews: {
+      [note.id]: { tab: 'styles', targets: [parent.id], position: { x: 120, y: 80 }, navigation },
+    },
+  }));
+  const reopened = await openStore();
+  expect((await reopened.read(key, location.href)).editorViews?.[note.id]?.navigation).toEqual(
+    navigation,
+  );
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    editorViews: {
+      [note.id]: {
+        ...record.editorViews![note.id]!,
+        navigation: { ...navigation, slots: [{ target: parent, history: [child, parent] }] },
+      },
+    },
+  }));
+  const invalid = await reopened.read(key, location.href);
+  expect(invalid.editorViews?.[note.id]?.navigation).toBeUndefined();
+  expect(invalid.editorViews?.[note.id]?.tab).toBe('styles');
+  expect(invalid.document.annotations[0]!.comment).toBe('Navigation');
+});
+
+it.each(['local', 'sync'] as const)(
+  'prunes shared style drafts only after the last marker is deleted through %s',
+  async (source) => {
+    const store = await openStore();
+    const key = pageKey();
+    const first = annotation('First reference');
+    const second = { ...first, id: crypto.randomUUID(), comment: 'Second reference' };
+    const target = first.targets[0]!;
+    target.styleChanges = [{ property: 'padding-top', before: '8px', value: '16px' }];
+    const changed = {
+      ...target,
+      styleChanges: [{ property: 'padding-top' as const, before: '8px', value: '24px' }],
+    };
+    const unsaved = { ...changed, id: crypto.randomUUID() };
+    await store.update(key, location.href, (record) => ({
+      ...record,
+      document: { ...record.document, annotations: [first, second] },
+      styleDrafts: [changed, unsaved],
+      stylePreview: { enabled: false, disabledTargets: [target.id, unsaved.id] },
+    }));
+    const remove = async (id: string) => {
+      if (source === 'local')
+        return store.mutate(key, location.href, {
+          id: crypto.randomUUID(),
+          kind: 'delete',
+          annotationId: id,
+        });
+      const record = await store.read(key, location.href);
+      return store.applySync(key, location.href, {
+        document: {
+          ...record.document,
+          annotations: record.document.annotations.filter((note) => note.id !== id),
+        },
+        acknowledged: [],
+      });
+    };
+    expect((await remove(first.id)).styleDrafts).toEqual([changed, unsaved]);
+    await remove(second.id);
+    const reopened = await openStore();
+    const saved = await reopened.read(key, location.href);
+    expect(saved.styleDrafts).toEqual([unsaved]);
+    expect(saved.stylePreview).toEqual({ enabled: false, disabledTargets: [unsaved.id] });
+  },
+);
+
 it('preserves local feedback and image blobs before accepting a recovered server version', async () => {
   const store = await openStore();
   const key = pageKey();

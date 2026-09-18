@@ -1,7 +1,7 @@
 import type { InspectorPosition } from '../core/types';
 
 export const TRIGGER_SIZE = 48;
-export const TOOLBAR_WIDTH = 254;
+export const TOOLBAR_WIDTH = 294;
 export const TOOLBAR_HEIGHT = 52;
 type Point = { left: number; top: number };
 type Size = { width: number; height: number };
