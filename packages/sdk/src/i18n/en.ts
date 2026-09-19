@@ -1,5 +1,7 @@
 import { styleEn } from './styles';
+import { variantsEn } from './variants';
 export const en = {
+  ...variantsEn,
   ...styleEn,
   settings: 'Settings',
   language: 'Language',

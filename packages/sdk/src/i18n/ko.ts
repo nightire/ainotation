@@ -1,7 +1,9 @@
 import type { Messages } from './en';
 import { styleKo } from './styles';
+import { variantsKo } from './variants';
 
 export const ko = {
+  ...variantsKo,
   ...styleKo,
   settings: '설정',
   language: '언어',

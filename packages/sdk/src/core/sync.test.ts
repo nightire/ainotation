@@ -1,5 +1,7 @@
 import {
   createFeedbackDocument,
+  createVariantExploration,
+  transitionVariants,
   STYLE_SYNC_CAPABILITIES,
   type FeedbackOperation,
 } from '@ainotation/schema';
@@ -13,6 +15,86 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+
+it.each(['variants', 'cleanup'] as const)(
+  'pauses before sending unsupported UI Variants %s data to an older service',
+  async (mode) => {
+    const document = createFeedbackDocument(location.href);
+    const operation: FeedbackOperation = {
+      id: crypto.randomUUID(),
+      kind: 'variants',
+      annotationId: crypto.randomUUID(),
+      explorationId: crypto.randomUUID(),
+      generation: 1,
+      revision: 2,
+      action: { type: 'cancel', feedback: '' },
+    };
+    if (mode === 'cleanup') {
+      const targetId = crypto.randomUUID();
+      const initial = createVariantExploration(operation.explorationId, [targetId]);
+      document.variantCleanups = [
+        {
+          id: operation.annotationId,
+          comment: 'Clean up generated code',
+          createdAt: document.createdAt,
+          updatedAt: document.createdAt,
+          deletedAt: document.createdAt,
+          reason: 'annotation-deleted',
+          page: capturePage(),
+          targets: [
+            {
+              id: targetId,
+              selector: 'body',
+              tagName: 'body',
+              text: '',
+              shadowHosts: [],
+              attributes: {},
+              styles: {},
+              rect: { x: 0, y: 0, width: 100, height: 100 },
+            },
+          ],
+          variants: transitionVariants(initial, { ...operation, revision: initial.revision })!,
+        },
+      ];
+    }
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      Response.json({
+        ok: true,
+        capabilities: {
+          ...STYLE_SYNC_CAPABILITIES,
+          ...(mode === 'cleanup' ? { uiVariants: 1 } : {}),
+        },
+      }),
+    );
+    const apply = vi.fn(async () => {});
+    const states = vi.fn();
+    const support = vi.fn();
+    const client = createSyncClient({
+      connection: { endpoint: 'http://127.0.0.1:4748', token: 'test-token' },
+      sessionId: document.id,
+      read: async () => ({
+        document,
+        operations: [operation],
+        draft: { text: '', editingId: null, targets: [] },
+        authority: null,
+      }),
+      apply,
+      onState: states,
+      onVariantsSupport: support,
+      onSync() {},
+    });
+    try {
+      await client.finished;
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fetcher.mock.calls[0]![0]).toBe('http://127.0.0.1:4748/health');
+      expect(apply).not.toHaveBeenCalled();
+      expect(states.mock.calls.at(-1)?.[1]).toMatchObject({ key: 'variantsUnsupported' });
+      expect(support).toHaveBeenCalledWith(false);
+    } finally {
+      client.stop();
+    }
+  },
+);
 
 it.each(['legacy', 'inline-only', 'clear-shared'] as const)(
   'retains local suggestions when the %s service cannot preserve shared styles',

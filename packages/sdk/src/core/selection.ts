@@ -139,6 +139,7 @@ export function createSelection(options: Options) {
   const ancestryHistory = new Map<string, TargetSnapshot[]>();
   const watched = new Map<string, { target: TargetSnapshot; status: Availability }>();
   let picking = false;
+  let suspended = false;
   let passthrough = false;
   let passedGesture = false;
   let interactionKeys: AbortController | undefined;
@@ -315,7 +316,7 @@ export function createSelection(options: Options) {
       rectangle.style.cssText = `left:${x}px;top:${y}px;width:${width}px;height:${height}px`;
       rectangles.push(rectangle);
     };
-    if (!passthrough) {
+    if (!passthrough && !suspended) {
       targets.forEach((target) => {
         const { element } = resolve(target);
         if (element) add(element);
@@ -510,6 +511,22 @@ export function createSelection(options: Options) {
     options.onPassthroughChange?.(value);
   }
 
+  // Keep the user's picking choice and manual Alt state, while the host owns interactions.
+  function setSuspended(value: boolean) {
+    if (destroyed || suspended === value) return;
+    suspended = value;
+    if (value) {
+      endBatch(false);
+      cancelledPointer = press?.pointerId ?? cancelledPointer;
+      press = null;
+      clearTextRange();
+      hover = null;
+      drawing.replaceChildren();
+    }
+    observeSizes();
+    schedule();
+  }
+
   function bypass(event: MouseEvent) {
     // Reconcile missed key events, including Alt held before Inspector was opened.
     setPassthrough(event.altKey);
@@ -625,7 +642,7 @@ export function createSelection(options: Options) {
     (event) => {
       if (!picking) return;
       pointerPosition = { x: event.clientX, y: event.clientY };
-      if (bypass(event)) return;
+      if (bypass(event) || suspended) return;
       if (press?.caret && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 6) {
         const end = textCaretAt(event.clientX, event.clientY, excluded);
         const range = end && rangeBetween(press.caret, end);
@@ -653,7 +670,7 @@ export function createSelection(options: Options) {
       handledRelease = null;
       press = null;
       if (!picking) return;
-      passedGesture = bypass(event);
+      passedGesture = bypass(event) || suspended;
       if (passedGesture) return;
       const element = eventElement(event);
       if (!picking || !event.isPrimary || event.button !== 0 || !element) return;
@@ -688,7 +705,12 @@ export function createSelection(options: Options) {
     (event) => {
       const start = press;
       press = null;
-      if (!picking || bypass(event) || passedGesture) return;
+      if (!picking) return;
+      if (
+        (bypass(event) || passedGesture || suspended) &&
+        !(suspended && cancelledPointer === event.pointerId)
+      )
+        return;
       if (cancelledPointer === event.pointerId) {
         cancelledPointer = null;
         handledRelease = {
@@ -758,16 +780,21 @@ export function createSelection(options: Options) {
     'click',
     (event) => {
       if (!picking) return;
-      if (bypass(event) || passedGesture) {
-        passedGesture = false;
-        return;
-      }
-      if (
+      const handled =
         handledRelease &&
         event.detail !== 0 &&
         performance.now() - handledRelease.time < 500 &&
-        Math.hypot(event.clientX - handledRelease.x, event.clientY - handledRelease.y) <= 6
-      ) {
+        Math.hypot(event.clientX - handledRelease.x, event.clientY - handledRelease.y) <= 6;
+      if (bypass(event) || passedGesture || suspended) {
+        passedGesture = false;
+        if (suspended && handled) {
+          handledRelease = null;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
+      if (handled) {
         handledRelease = null;
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -785,7 +812,7 @@ export function createSelection(options: Options) {
     'keydown',
     (event) => {
       handledRelease = null;
-      if (!picking || event.isComposing || passthrough || event.altKey) return;
+      if (!picking || suspended || event.isComposing || passthrough || event.altKey) return;
       if (event.key === 'Shift') {
         if (
           !event
@@ -932,6 +959,7 @@ export function createSelection(options: Options) {
     },
     setVisible,
     setPicking,
+    setSuspended,
     select,
     setTargets,
     remove(id: string) {

@@ -187,6 +187,29 @@ function fixture(tag = 'div') {
 }
 
 describe('in-place annotation markers', () => {
+  it('distinguishes a disconnected variants entry from a connected outdated service and enables it after upgrade', () => {
+    const { view, root, layer, control, onAction } = mount({
+      editorOpen: true,
+      marker: annotation.marker!,
+      locale: 'zh-Hans',
+    });
+    const toggle = () =>
+      control<HTMLButtonElement>('[role="switch"][data-action="variants-toggle"]');
+    expect(toggle().disabled).toBe(true);
+    expect(root.querySelector('.variants-hint')?.textContent).toContain('连接支持 UI Variants');
+    layer.update({ ...view, connection: 'connected', variantsSupported: false }, true);
+    expect(toggle().disabled).toBe(true);
+    expect(root.querySelector('.variants-hint')?.textContent).toContain(
+      '更新并重启 MCP 服务和开发服务器',
+    );
+    layer.update({ ...view, connection: 'connected', variantsSupported: true }, true);
+    expect(toggle().disabled).toBe(false);
+    toggle().click();
+    expect(onAction).toHaveBeenCalledExactlyOnceWith({ type: 'variants-toggle', value: true });
+    layer.update({ ...view, localOnly: true }, true);
+    expect(root.querySelector('[data-action="variants-toggle"]')).toBeNull();
+  });
+
   it('shows a compact locator with separate target context and full shadow details', () => {
     const selected = {
       ...target,

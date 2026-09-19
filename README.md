@@ -13,6 +13,7 @@ Select an element, describe what should change, and give your coding agent the c
 
 - **Feedback in context.** Annotate elements or text selections with selectors, styles, geometry and surrounding DOM information.
 - **Try a style change.** Adjust common CSS properties on the real page, then save the original and desired values with your feedback.
+- **Explore UI Variants.** Ask your agent for structural design candidates, compare them in place and record a decision before asking the agent to continue.
 - **Draw on the page.** Add arrows, shapes and freehand strokes, select multiple shapes, and crop screenshots. Import images by pasting, dropping or choosing a file.
 - **Work with AI agents.** Read and edit saved feedback through a local MCP service, including image attachments on demand.
 - **Keep working locally.** Drafts and annotations survive reloads. Copy Markdown or export feedback without an MCP connection. No account or cloud service required.
@@ -115,6 +116,53 @@ silently replaced by a lookalike with the same selector.
 Update and restart older MCP services before syncing style suggestions. The SDK
 pauses incompatible sync and retains local feedback instead of accepting a
 response that cannot preserve these fields.
+
+## UI Variants
+
+Connect a compatible MCP service, select one or more disjoint elements, and enable
+**UI Variants** in the feedback panel. Save your request, then ask your coding agent
+to read it. The agent reads Ainotation's integration guide, implements development-only
+candidates in your host framework and registers them through MCP.
+
+The page controller compares **Original** with three candidates by default (up to
+six). Multi-target designs switch together; structure can change and local component
+state may reset. A failed switch returns to the previous design. Original snapshots
+and existing style drafts are retained; overlapping style overrides are paused.
+
+Use Previous/Next to cycle through designs; the compact controller shows only the
+current design and its page number, counting Original as a page. It starts at the
+bottom center and can be moved by dragging blank areas. The position is remembered
+locally per project/page and restored on refresh within the visible viewport.
+The minimize button collapses it to a draggable title row; expanding retains the
+current candidate and feedback without interrupting comparison.
+Cancel is the last footer action with destructive styling and a confirmation
+dialog. Keep comparing or Escape returns without recording a cancellation.
+After the agent reports cleanup complete, the switch returns to off and can be
+enabled again. Saving starts a fresh exploration on the same annotation; ordinary
+saves retain the completed record.
+
+Deleting an unfinished exploration's annotation, including Clear all, cancels the
+exploration and returns the preview to Original. A separate pending cleanup record
+survives refreshes and service restarts. Ask your agent to restore the source and
+remove generated candidates and temporary integration; it can query and complete
+cleanup using the former annotation ID. The page remains occupied until cleanup
+is reported complete. Deletion does not automatically wake an agent or edit source.
+
+During comparison, picking, selection outlines and page markers pause automatically
+so you can interact with candidates directly. Confirming, regenerating or cancelling
+restores picking; the next published generation pauses it again. The controller and
+View annotation action remain available throughout comparison.
+
+**I want this**, **Regenerate** and **Cancel** save your decision.
+You decide when to tell the agent to continue. Selecting a design does not edit the
+source automatically, and cancellation still needs the agent to remove temporary
+integration. One exploration can be active per project/full page URL; other ordinary
+annotations remain available. Local-only instances do not show UI Variants.
+
+See the [SDK integration guide](packages/sdk/README.md#ui-variants) and
+[MCP tools](packages/mcp/README.md#ui-variants). Vite provides
+`virtual:ainotation/variants` with an original-only production fallback. Candidate
+implementations and CSS must be development-gated by the host.
 
 ## Connect your coding agent
 

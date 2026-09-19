@@ -106,6 +106,7 @@ export function createStyleEditor(
   let blocked = new Map<string, 'missing' | 'changed'>();
   let rejectedIdentity = new Set<string>();
   let suspended = false;
+  let variantTargets = new Set<string>();
   let destroyed = false;
   const applied = new Map<string, InlineStylePreview>();
   let undo: Edit[] = [],
@@ -253,7 +254,7 @@ export function createStyleEditor(
     const usable: [string, StyledElement, StyleChange[]][] = [];
     for (const key of targets.keys()) {
       const list = changes(key);
-      if (!list.length || disabled.has(key)) continue;
+      if (!list.length || disabled.has(key) || variantTargets.has(key)) continue;
       if (blocked.has(key)) continue;
       const element = styled(key);
       if (!element) {
@@ -496,6 +497,13 @@ export function createStyleEditor(
       });
     },
     sync,
+    holdForVariants(ids: string[]) {
+      const next = new Set(ids.map(canonical));
+      if (next.size === variantTargets.size && [...next].every((id) => variantTargets.has(id)))
+        return;
+      variantTargets = next;
+      apply();
+    },
     register: (next: TargetSnapshot[]) => capture(() => register(next)),
     begin(next: TargetSnapshot[], retainRelated = false) {
       capture(() => {

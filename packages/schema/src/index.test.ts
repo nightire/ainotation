@@ -251,7 +251,9 @@ describe('feedback contract', () => {
     expect(exported.annotations[0]?.marker).toEqual(annotation.marker);
     expect(next.annotations[0]?.replies).toEqual(annotation.replies);
     expect(JSON.stringify(feedbackExportJsonSchema())).not.toContain('replies');
-    expect(JSON.stringify(feedbackExportJsonSchema())).not.toContain('status');
+    expect(feedbackExportJsonSchema()).not.toHaveProperty(
+      'properties.annotations.items.properties.status',
+    );
     const before = structuredClone(next);
     const compact = feedbackMarkdown(next, { detail: 'compact' });
     const standard = feedbackMarkdown(next);

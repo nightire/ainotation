@@ -4,7 +4,11 @@ import {
   feedbackExport,
   feedbackExportJsonSchema,
   type FeedbackExport,
+  type VariantOperation,
+  VariantChoicesSchema,
+  variantInstructions,
 } from '@ainotation/schema';
+import { VARIANTS_GUIDE, VARIANTS_GUIDE_URI } from './variants-guide';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
@@ -51,6 +55,7 @@ export {
 } from './project';
 
 export interface McpFeedbackBackend {
+  variants?(sessionId: string, operation: VariantOperation): Promise<FeedbackExport>;
   getImage?(sessionId: string, imageId: string): Promise<{ data: string; mimeType: 'image/png' }>;
   list(): Promise<FeedbackExport[]>;
   get(sessionId: string): Promise<FeedbackExport>;
@@ -63,6 +68,19 @@ export interface McpFeedbackBackend {
   deleteAnnotation(sessionId: string, annotationId: string): Promise<FeedbackExport>;
 }
 export type McpBackendResolver = (project?: string) => Promise<McpFeedbackBackend>;
+
+function variantHandoff(document: FeedbackExport) {
+  const instructions = [...document.annotations, ...(document.variantCleanups ?? [])]
+    .filter((annotation) => annotation.variants)
+    .map((annotation) => ({
+      annotationId: annotation.id,
+      instructions:
+        ('deletedAt' in annotation && annotation.variants?.status !== 'completed'
+          ? 'Annotation deleted: restore Original and remove generated variants and temporary integration. '
+          : '') + variantInstructions(annotation.variants!),
+    }));
+  return instructions.length ? { ...document, variantInstructions: instructions } : document;
+}
 
 export function createMcpServer(
   store: FeedbackStore | McpFeedbackBackend | McpBackendResolver = new FeedbackStore(),
@@ -91,6 +109,9 @@ export function createMcpServer(
           async deleteAnnotation(sessionId, annotationId) {
             return feedbackExport(await store.deleteAnnotation(sessionId, annotationId));
           },
+          async variants(sessionId, operation) {
+            return feedbackExport(await store.variants(sessionId, operation));
+          },
         }
       : store;
   const backendFor: McpBackendResolver =
@@ -102,6 +123,15 @@ export function createMcpServer(
     );
   const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
   const server = new McpServer({ name: 'ainotation', version });
+  server.registerResource(
+    'ui-variants-guide',
+    VARIANTS_GUIDE_URI,
+    {
+      mimeType: 'text/markdown',
+      description: 'UI Variants integration and decision handoff protocol v1.',
+    },
+    (uri) => ({ contents: [{ uri: uri.href, text: VARIANTS_GUIDE }] }),
+  );
   server.registerTool(
     'ainotation_get_schema',
     {
@@ -115,13 +145,23 @@ export function createMcpServer(
   );
   const readAnnotations = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
   server.registerTool(
+    'ainotation_get_variants_guide',
+    {
+      description:
+        'Read UI Variants protocol v1, host integration examples and cleanup requirements before generating candidates.',
+      inputSchema: {},
+      annotations: readAnnotations,
+    },
+    () => ({ content: [{ type: 'text' as const, text: VARIANTS_GUIDE }] }),
+  );
+  server.registerTool(
     'ainotation_list_sessions',
     {
       description: 'List feedback sessions with annotation content and page/target context.',
       inputSchema: z.object(scope).strict(),
       annotations: readAnnotations,
     },
-    (input) => respond(async () => (await forInput(input)).list()),
+    (input) => respond(async () => (await (await forInput(input)).list()).map(variantHandoff)),
   );
   server.registerTool(
     'ainotation_get_feedback',
@@ -130,7 +170,11 @@ export function createMcpServer(
       inputSchema: z.object({ ...scope, sessionId: z.uuid() }).strict(),
       annotations: readAnnotations,
     },
-    (input) => respond(async () => (await forInput(input)).get(input.sessionId)),
+    (input) =>
+      respond(async () => {
+        const document = await (await forInput(input)).get(input.sessionId);
+        return variantHandoff(document);
+      }),
   );
   const pair = { sessionId: z.uuid(), annotationId: z.uuid() };
   server.registerTool(
@@ -195,7 +239,10 @@ export function createMcpServer(
           (item) => item.id === input.annotationId,
         );
         if (!annotation) throw new StoreError(404, 'Annotation not found in session');
-        return AnnotationContentSchema.parse(annotation);
+        const content = AnnotationContentSchema.parse(annotation);
+        return content.variants
+          ? { ...content, variantInstructions: variantInstructions(content.variants) }
+          : content;
       }),
   );
   server.registerTool(
@@ -223,6 +270,93 @@ export function createMcpServer(
       respond(async () =>
         (await forInput(input)).deleteAnnotation(input.sessionId, input.annotationId),
       ),
+  );
+  server.registerTool(
+    'ainotation_get_variants',
+    {
+      description:
+        'Read the latest UI Variants state, browser readiness report, user decision and original target context. Previewing is not acceptance.',
+      inputSchema: z.object({ ...scope, ...pair }).strict(),
+      annotations: readAnnotations,
+    },
+    (input) =>
+      respond(async () => {
+        const document = await (await forInput(input)).get(input.sessionId);
+        const annotation =
+          document.annotations.find((item) => item.id === input.annotationId) ??
+          document.variantCleanups?.find((item) => item.id === input.annotationId);
+        if (!annotation?.variants) throw new StoreError(404, 'UI Variants exploration not found');
+        return {
+          annotation,
+          instructions:
+            ('deletedAt' in annotation && annotation.variants.status !== 'completed'
+              ? 'Annotation deleted: restore Original and remove generated variants and temporary integration. '
+              : '') + variantInstructions(annotation.variants),
+          guide: VARIANTS_GUIDE_URI,
+        };
+      }),
+  );
+  const variantMutation = {
+    ...scope,
+    ...pair,
+    operationId: z.uuid(),
+    explorationId: z.uuid(),
+    generation: z.number().int().positive(),
+    revision: z.number().int().positive(),
+  };
+  server.registerTool(
+    'ainotation_publish_variants',
+    {
+      description:
+        'Register generated candidates for the exact exploration generation/revision. Original is separate. Does not claim browser readiness. Reuse operationId on retries.',
+      inputSchema: z.object({ ...variantMutation, choices: VariantChoicesSchema }).strict(),
+      annotations: mutationAnnotations,
+    },
+    (input) =>
+      respond(async () => {
+        const backend = await forInput(input);
+        if (!backend.variants)
+          throw new StoreError(501, 'Upgrade the service to support UI Variants');
+        return backend.variants(input.sessionId, {
+          id: input.operationId,
+          kind: 'variants',
+          annotationId: input.annotationId,
+          explorationId: input.explorationId,
+          generation: input.generation,
+          revision: input.revision,
+          action: { type: 'publish', choices: input.choices },
+        });
+      }),
+  );
+  server.registerTool(
+    'ainotation_complete_variants',
+    {
+      description:
+        'Report that the selected design was applied (or original restored), temporary integration removed, and checks passed. Requires the latest decision ID. Reuse operationId on retries.',
+      inputSchema: z
+        .object({
+          ...variantMutation,
+          decisionId: z.uuid(),
+          summary: z.string().trim().min(1).max(2000),
+        })
+        .strict(),
+      annotations: mutationAnnotations,
+    },
+    (input) =>
+      respond(async () => {
+        const backend = await forInput(input);
+        if (!backend.variants)
+          throw new StoreError(501, 'Upgrade the service to support UI Variants');
+        return backend.variants(input.sessionId, {
+          id: input.operationId,
+          kind: 'variants',
+          annotationId: input.annotationId,
+          explorationId: input.explorationId,
+          generation: input.generation,
+          revision: input.revision,
+          action: { type: 'complete', decisionId: input.decisionId, summary: input.summary },
+        });
+      }),
   );
   return server;
 }

@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@ainotation/mcp": "workspace:*",
+    "@ainotation/schema": "workspace:*",
     "@ainotation/vite": "workspace:*",
     "@modelcontextprotocol/sdk": "catalog:",
     "@types/node": "catalog:",

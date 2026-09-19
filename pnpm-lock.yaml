@@ -215,6 +215,9 @@ importers:
       '@ainotation/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@ainotation/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       '@ainotation/vite':
         specifier: workspace:*
         version: link:../../packages/vite

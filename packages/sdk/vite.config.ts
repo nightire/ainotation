@@ -3,7 +3,7 @@ import { playwright } from 'vite-plus/test/browser-playwright';
 
 export default defineConfig({
   pack: {
-    entry: { index: 'src/index.ts', ui: 'src/ui/index.ts' },
+    entry: { index: 'src/index.ts', ui: 'src/ui/index.ts', variants: 'src/variants.ts' },
     platform: 'browser',
     dts: true,
     format: ['esm'],

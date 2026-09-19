@@ -18,6 +18,11 @@
   "type": "module",
   "types": "./dist/index.d.mts",
   "exports": {
+    "./variants": {
+      "development": "./src/variants.ts",
+      "types": "./dist/variants.d.mts",
+      "import": "./dist/variants.mjs"
+    },
     ".": {
       "development": "./src/index.ts",
       "types": "./dist/index.d.mts",
@@ -26,6 +31,10 @@
   },
   "publishConfig": {
     "exports": {
+      "./variants": {
+        "types": "./dist/variants.d.mts",
+        "import": "./dist/variants.mjs"
+      },
       ".": {
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs"

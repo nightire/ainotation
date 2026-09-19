@@ -40,7 +40,11 @@ export interface DraftRecord {
     targetsAdjusted?: boolean;
     styleTargets?: TargetSnapshot[];
     editorSessionId?: string;
+    variantsRequested?: boolean;
+    variantRequestBase?: string;
   };
+  variantFeedback?: { explorationId: string; text: string };
+  variantPosition?: { x: number; y: number };
   images?: Record<string, Blob>;
   styleDrafts?: TargetSnapshot[];
   stylePreview?: { enabled: boolean; disabledTargets: string[] };
@@ -151,6 +155,9 @@ export async function createDraftStore(options: {
         ),
       );
       const editorViews: Record<string, EditorPresentation> = {};
+      const variantPosition = MarkerAnchorSchema.pick({ x: true, y: true }).safeParse(
+        value.variantPosition,
+      );
       for (const [id, presentation] of Object.entries(value.editorViews ?? {}).slice(-1001)) {
         if (
           !TargetSnapshotSchema.shape.id.safeParse(id).success ||
@@ -200,6 +207,17 @@ export async function createDraftStore(options: {
       }
       return {
         images,
+        ...(variantPosition.success ? { variantPosition: variantPosition.data } : {}),
+        ...(value.variantFeedback &&
+        TargetSnapshotSchema.shape.id.safeParse(value.variantFeedback.explorationId).success &&
+        typeof value.variantFeedback.text === 'string'
+          ? {
+              variantFeedback: {
+                explorationId: value.variantFeedback.explorationId,
+                text: value.variantFeedback.text.slice(0, 10000),
+              },
+            }
+          : {}),
         ...(Object.keys(editorViews).length ? { editorViews } : {}),
         ...(value.styleDrafts
           ? { styleDrafts: TargetSnapshotSchema.array().max(20000).parse(value.styleDrafts) }
@@ -248,6 +266,11 @@ export async function createDraftStore(options: {
         authority: typeof value.authority === 'string' ? value.authority : null,
         draft: {
           text: typeof value.draft.text === 'string' ? value.draft.text.slice(0, 10000) : '',
+          ...(value.draft.variantsRequested ? { variantsRequested: true } : {}),
+          ...(value.draft.variantsRequested &&
+          TargetSnapshotSchema.shape.id.safeParse(value.draft.variantRequestBase).success
+            ? { variantRequestBase: value.draft.variantRequestBase! }
+            : {}),
           editingId: typeof value.draft.editingId === 'string' ? value.draft.editingId : null,
           ...(TargetSnapshotSchema.shape.id.safeParse(value.draft.editorSessionId).success
             ? { editorSessionId: value.draft.editorSessionId! }
@@ -430,6 +453,8 @@ export async function createDraftStore(options: {
             draft.page,
             draft.images ?? [],
             draft.styleTargets ?? [],
+            draft.variantsRequested ?? false,
+            draft.variantRequestBase ?? null,
           ]);
         const clearDraft = submittedDraft && identity(record.draft) === identity(submittedDraft);
         return {

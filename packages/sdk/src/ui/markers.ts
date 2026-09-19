@@ -22,8 +22,15 @@ import { toolNode } from '../core/dom';
 import { getViewport } from './position';
 import { messages } from '../i18n';
 import { bindMarkerEvents } from './marker-input';
+import { createVariantConfirmation } from './variant-confirmation';
 import { targetDescription, targetLocatorText } from './target-description';
 import { createStylePanel, stylePanelStyles } from './style-panel';
+import {
+  variantPanelStyles,
+  variantToggle,
+  variantController,
+  handleVariantControl,
+} from './variant-panel';
 
 type Rect = TargetSnapshot['rect'];
 type Options = {
@@ -34,6 +41,7 @@ type Options = {
 const styles = css`
   ${themeStyles}
   ${stylePanelStyles}
+  ${variantPanelStyles}
   * {
     box-sizing: border-box;
   }
@@ -385,6 +393,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
   host.style.cssText =
     'all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;display:none!important;';
   const shadow = host.attachShadow({ mode: 'open' });
+  const variantConfirmation = createVariantConfirmation(shadow, (action) => onAction(action));
   (document.body ?? document.documentElement).append(host);
   let view: InspectorViewState | null = null;
   let visible = false;
@@ -395,8 +404,13 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
   let annotationIds = new Set<string>();
   const abort = new AbortController();
   let lockedPosition: { x: number; y: number } | null = null;
+  let variantPosition: { x: number; y: number } | null = null;
+  let variantPositionKey = '';
+  let variantScopeKey = '';
   let drag: {
     panel: HTMLElement;
+    kind: 'editor' | 'variants';
+    startPosition: { x: number; y: number } | null;
     id: number;
     x: number;
     y: number;
@@ -415,13 +429,20 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     current.panel.classList.remove('dragging');
     if (current.panel.hasPointerCapture(current.id))
       current.panel.releasePointerCapture(current.id);
+    if (current.kind === 'variants' && (!persist || current.cancelled))
+      variantPosition = current.startPosition;
     if (persist && current.moved && !current.cancelled && current.panel.isConnected) {
       const rect = current.panel.getBoundingClientRect();
-      onAction({ type: 'editor-position', position: { x: rect.x, y: rect.y } });
+      if (current.kind === 'variants')
+        variantPositionKey = JSON.stringify(view?.variantPosition ?? null);
+      onAction({
+        type: current.kind === 'variants' ? 'variant-position' : 'editor-position',
+        position: { x: rect.x, y: rect.y },
+      });
     }
   }
   function dragSurface(target: Element, event: PointerEvent) {
-    const panel = target.closest<HTMLElement>('.popover');
+    const panel = target.closest<HTMLElement>('.popover, .variants-controller');
     if (!panel || (target.closest(interactive) && target.closest(interactive) !== panel))
       return null;
     for (let node: Element | null = target; node; node = node.parentElement) {
@@ -572,6 +593,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       const id = button.dataset.annotationId;
       const anchor = id ? positions.get(id) : active;
       button.hidden =
+        view.variantsComparing ||
         !anchor ||
         anchor.x < left ||
         anchor.y < top ||
@@ -607,6 +629,21 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
         (y + 18 + size.height > top + height - 8 ? y - 18 - size.height : y + 18);
       popover.style.left = `${Math.max(left + 8, Math.min(preferredX, left + width - size.width - 8))}px`;
       popover.style.top = `${Math.max(top + 8, Math.min(preferredY, top + height - size.height - 8))}px`;
+    }
+    const controller = shadow.querySelector<HTMLElement>('.variants-controller');
+    if (controller) {
+      elements.add(controller);
+      // Leave a toolbar lane where a centered panel would overlap its default right anchor.
+      const bottomGap = width < 960 ? 72 : 16;
+      controller.style.width = `${Math.max(0, Math.min(480, width - 16))}px`;
+      controller.style.maxHeight = `${Math.max(0, height - bottomGap - 8)}px`;
+      controller.style.transform = 'none';
+      controller.style.bottom = 'auto';
+      const size = controller.getBoundingClientRect();
+      const preferredX = variantPosition?.x ?? left + (width - size.width) / 2;
+      const preferredY = variantPosition?.y ?? top + height - size.height - bottomGap;
+      controller.style.left = `${Math.max(left + 8, Math.min(preferredX, left + width - size.width - 8))}px`;
+      controller.style.top = `${Math.max(top + 8, Math.min(preferredY, top + height - size.height - 8))}px`;
     }
     for (const element of observedElements) {
       if (!elements.has(element)) {
@@ -647,6 +684,9 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     }
     const type = button.dataset.action;
     switch (type) {
+      case 'variants-toggle':
+        onAction({ type: 'variants-toggle', value: !view.variantsRequested });
+        break;
       case 'target-parent':
       case 'target-back':
         if (button.dataset.targetId)
@@ -695,7 +735,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       ) {
         event.preventDefault();
         drag.cancelled = true;
-        lockedPosition = { x: drag.left, y: drag.top };
+        if (drag.kind === 'variants') variantPosition = drag.startPosition;
+        else lockedPosition = { x: drag.left, y: drag.top };
         position();
         return;
       }
@@ -710,10 +751,12 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
           if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 3) return;
           drag.moved = true;
           drag.panel.classList.add('dragging');
-          lockedPosition = {
+          const moved = {
             x: drag.left + event.clientX - drag.x,
             y: drag.top + event.clientY - drag.y,
           };
+          if (drag.kind === 'variants') variantPosition = moved;
+          else lockedPosition = moved;
           position();
           return;
         }
@@ -754,6 +797,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
           const rect = panel.getBoundingClientRect();
           drag = {
             panel,
+            kind: panel.matches('.variants-controller') ? 'variants' : 'editor',
+            startPosition: panel.matches('.variants-controller') ? variantPosition : lockedPosition,
             id: event.pointerId,
             x: event.clientX,
             y: event.clientY,
@@ -766,24 +811,33 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
           return;
         }
       }
+      if (variantConfirmation.handle(event, target)) return;
       if (stylePanel.handle(event, target)) return;
       if (
-        target.matches('.popover') &&
+        target.matches('.popover, .variants-controller') &&
+        !drag &&
         event instanceof KeyboardEvent &&
         event.type === 'keydown' &&
         event.key.startsWith('Arrow')
       ) {
         event.preventDefault();
-        const rect = shadow.querySelector('.popover')!.getBoundingClientRect();
-        lockedPosition = {
+        const rect = target.getBoundingClientRect();
+        const nextPosition = {
           x: rect.x + (event.key === 'ArrowRight' ? 16 : event.key === 'ArrowLeft' ? -16 : 0),
           y: rect.y + (event.key === 'ArrowDown' ? 16 : event.key === 'ArrowUp' ? -16 : 0),
         };
+        const isVariants = target.matches('.variants-controller');
+        if (isVariants) variantPosition = nextPosition;
+        else lockedPosition = nextPosition;
         position();
-        const moved = shadow.querySelector('.popover')!.getBoundingClientRect();
-        onAction({ type: 'editor-position', position: { x: moved.x, y: moved.y } });
+        const moved = target.getBoundingClientRect();
+        onAction({
+          type: isVariants ? 'variant-position' : 'editor-position',
+          position: { x: moved.x, y: moved.y },
+        });
         return;
       }
+      if (view && handleVariantControl(event, target, view, onAction)) return;
       if (event.type === 'click') {
         const button = target.closest('button');
         if (button) activate(button);
@@ -841,6 +895,17 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
     update(next: InspectorViewState, nextVisible: boolean) {
       if (destroyed) return;
       if (!nextVisible || next.passthrough) finishDrag(false);
+      const nextScope = JSON.stringify([next.document?.id, next.document?.url]);
+      const nextPositionKey = JSON.stringify(next.variantPosition ?? null);
+      if (
+        variantScopeKey !== nextScope ||
+        (drag?.kind !== 'variants' && variantPositionKey !== nextPositionKey)
+      ) {
+        if (variantScopeKey !== nextScope && drag?.kind === 'variants') finishDrag(false);
+        variantPosition = next.variantPosition ? { ...next.variantPosition } : null;
+        variantPositionKey = nextPositionKey;
+        variantScopeKey = nextScope;
+      }
       host.dataset.theme = next.theme;
       host.lang = next.locale;
       const m = messages(next.locale);
@@ -861,6 +926,9 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       visible = nextVisible;
       host.style.setProperty('display', visible ? 'block' : 'none', 'important');
       const annotations = next.document?.annotations ?? [];
+      const variantTargetsLocked =
+        next.variantsRequested ||
+        !!annotations.find((annotation) => annotation.id === next.editingId)?.variants;
       const editorTargets =
         next.editingId && !next.targetsAdjusted && !next.editorSessionId
           ? (annotations.find((annotation) => annotation.id === next.editingId)?.targets ??
@@ -879,7 +947,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       if (key !== editorKey) {
         stylePanel.reset();
         lockedPosition = next.editorPosition ? { ...next.editorPosition } : null;
-        finishDrag(false);
+        if (drag?.kind === 'editor') finishDrag(false);
       } else if (!lockedPosition && (next.editorTab === 'styles' || next.styleEditor.count)) {
         const rect = shadow.querySelector('.popover')?.getBoundingClientRect();
         if (rect) lockedPosition = { x: rect.x, y: rect.y };
@@ -940,8 +1008,8 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                                   ${targetDescription(target)}
                                 </div>
                                 <div class="target-tools">
-                                  ${next.targetNavigation[target.id]?.back ? html`<button type="button" data-action="target-back" data-target-id=${target.id} aria-label=${m.previousTarget} title=${m.previousTarget} ?disabled=${next.saving}>${createElement(ArrowDown, { 'aria-hidden': 'true', focusable: 'false' })}</button>` : nothing}
-                                  ${next.targetNavigation[target.id]?.parent ? html`<button type="button" data-action="target-parent" data-target-id=${target.id} aria-label=${m.parentTarget} title=${m.parentTarget} ?disabled=${next.saving}>${createElement(ArrowUp, { 'aria-hidden': 'true', focusable: 'false' })}</button>` : nothing}
+                                  ${next.targetNavigation[target.id]?.back ? html`<button type="button" data-action="target-back" data-target-id=${target.id} aria-label=${m.previousTarget} title=${m.previousTarget} ?disabled=${next.saving || variantTargetsLocked}>${createElement(ArrowDown, { 'aria-hidden': 'true', focusable: 'false' })}</button>` : nothing}
+                                  ${next.targetNavigation[target.id]?.parent ? html`<button type="button" data-action="target-parent" data-target-id=${target.id} aria-label=${m.parentTarget} title=${m.parentTarget} ?disabled=${next.saving || variantTargetsLocked}>${createElement(ArrowUp, { 'aria-hidden': 'true', focusable: 'false' })}</button>` : nothing}
                                 </div>
                               </div>
                               <div class="target-locator">
@@ -973,6 +1041,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                         aria-labelledby="ain-feedback-tab"
                         ?hidden=${next.editorTab !== 'feedback'}
                       >
+                        ${variantToggle(next)}
                         <textarea
                           aria-label=${m.feedbackContent}
                           aria-keyshortcuts="Meta+Enter"
@@ -1019,7 +1088,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                           )}
                         </div>
                       </div>
-                      ${next.editorTab === 'styles' ? stylePanel.body(next) : nothing}
+                      ${next.editorTab === 'styles' ? (next.variantStyleBlocked ? html`<p class="variants-hint">${m.variantsStylesPaused}</p>` : stylePanel.body(next)) : nothing}
                       <div class="actions">
                         <button
                           type="button"
@@ -1057,7 +1126,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                             aria-label=${next.editingId ? m.save : m.add}
                             title=${m.shortcut(next.editingId ? m.save : m.add, 'Command/Super + Enter')}
                             aria-keyshortcuts="Meta+Enter"
-                            ?disabled=${(!next.draft.trim() && !next.styleEditor.count && !next.styleEditor.dirty) || stylePanel.invalid() || next.saving || next.storage === 'loading'}
+                            ?disabled=${(!next.draft.trim() && !next.styleEditor.count && !next.styleEditor.dirty && !next.variantsRequested) || stylePanel.invalid() || next.saving || next.storage === 'loading'}
                             data-action="save"
                           >
                             ${createElement(Check, { 'aria-hidden': 'true', focusable: 'false' })}
@@ -1087,10 +1156,13 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
                   `
                 : nothing
             }
+            ${variantController(next)} ${variantConfirmation.template(next)}
           </div>
         `,
         shadow,
       );
+      variantConfirmation.update(next, nextVisible);
+      if (drag && !drag.panel.isConnected) finishDrag(false);
       if (visible) {
         position();
         schedule();
@@ -1134,6 +1206,7 @@ export function createMarkerLayer({ onAction, getRect }: Options): {
       if (destroyed) return;
       finishDrag(false);
       destroyed = true;
+      variantConfirmation.destroy();
       abort.abort();
       resize.disconnect();
       mutations.disconnect();

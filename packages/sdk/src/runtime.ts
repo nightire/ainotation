@@ -1,4 +1,10 @@
-import { AnnotationSchema, MAX_ANNOTATION_IMAGES } from '@ainotation/schema';
+import {
+  AnnotationSchema,
+  MAX_ANNOTATION_IMAGES,
+  variantActive,
+  variantAnnotations,
+  type VariantAction,
+} from '@ainotation/schema';
 import type {
   Annotation,
   FeedbackDocument,
@@ -21,6 +27,7 @@ import { describeImage } from './core/images';
 import { themeStyles } from './ui/theme';
 import { targetLocatorText } from './ui/target-description';
 import { createStyleEditor } from './core/style-editor';
+import { createVariantsController, overlappingVariantTargets } from './core/variants-controller';
 import {
   createI18n,
   detectLocale,
@@ -67,6 +74,7 @@ export async function createRuntime(
   const imageUrls = new Map<string, string>();
   let markerLayer: ReturnType<typeof createMarkerLayer> | undefined;
   let styleEditor: ReturnType<typeof createStyleEditor> | undefined;
+  let variants: ReturnType<typeof createVariantsController> | undefined;
   let editorViews: Record<string, EditorPresentation> = {};
   function rememberEditor() {
     if (!view.editorSessionId) return;
@@ -126,7 +134,7 @@ export async function createRuntime(
   let navigation: ReturnType<typeof setInterval> | undefined;
   let connection: McpConnection | null = null;
   let projectRecovery: AbortController | undefined;
-  let applySelectionTheme: (theme: string) => void = () => {};
+  let applySelectionState: (theme: string, comparing: boolean) => void = () => {};
   let sync: ReturnType<typeof createSyncClient> | undefined;
   function mergeStyleTargets(base: TargetSnapshot[]): TargetSnapshot[] {
     const result = styleEditor?.project(base) ?? structuredClone(base);
@@ -139,13 +147,44 @@ export async function createRuntime(
     if (!disposed && !signal.aborted) {
       i18n.setLocale(view.locale);
       if (view.messageDescriptor) view.message = formatMessage(view.locale, view.messageDescriptor);
-      applySelectionTheme(view.theme);
       if (styleEditor) {
         styleEditor.reconcile();
         view.styleTargetId = styleEditor.active();
         view.styleTargets = styleEditor.scopeTargets();
         view.styleEditor = styleEditor.state();
       }
+      const exploring =
+        record &&
+        variantAnnotations(record.document).find((annotation) =>
+          variantActive(annotation.variants),
+        );
+      const exploration = exploring?.variants;
+      view.variantsComparing =
+        !localOnly &&
+        exploration?.status === 'published' &&
+        exploration.manifest?.generation === exploration.generation;
+      applySelectionState(view.theme, view.variantsComparing);
+      const variantRoots = variants?.elements() ?? [];
+      view.variantStyleBlocked =
+        view.variantsRequested ||
+        !!(
+          view.editingId &&
+          variantActive(
+            record?.document.annotations.find((annotation) => annotation.id === view.editingId)
+              ?.variants,
+          )
+        ) ||
+        !!exploring?.variants?.targetIds.some((id) =>
+          view.selected.some((target) => target.id === id),
+        ) ||
+        (!!exploring &&
+          view.selected.some((target) => {
+            const element = selection.getElement(target);
+            return (
+              !!element && variantRoots.some((root) => overlappingVariantTargets([root, element]))
+            );
+          }));
+      view.variantPreview = variants?.state() ?? view.variantPreview;
       for (const [id, url] of imageUrls) {
         if (!view.images.some((image) => image.id === id)) {
           URL.revokeObjectURL(url);
@@ -249,6 +288,7 @@ export async function createRuntime(
       if (view.editingId) {
         view.draft = '';
         view.images = [];
+        view.variantsRequested = false;
       }
       view.editingId = null;
       view.selected = targets;
@@ -278,6 +318,7 @@ export async function createRuntime(
       if (view.editingId) {
         view.draft = '';
         view.images = [];
+        view.variantsRequested = false;
       }
       view.editingId = null;
       view.editorOpen = false;
@@ -290,12 +331,37 @@ export async function createRuntime(
     },
   });
   styleEditor = createStyleEditor((target) => selection.getElement(target), render);
-  applySelectionTheme = (theme) => selection.setTheme(theme);
+  variants = createVariantsController({
+    onChange() {
+      if (!disposed && !reconcilePage()) render();
+    },
+    onReport(preview) {
+      if (disposed || reconcilePage()) return false;
+      const annotation = record?.document.annotations.find(
+        (item) => item.id === view.variantAnnotationId,
+      );
+      const exploration = annotation?.variants;
+      if (!annotation || !exploration || !view.variantsSupported || disposed) return false;
+      void mutate({
+        id: crypto.randomUUID(),
+        kind: 'variants',
+        annotationId: annotation.id,
+        explorationId: exploration.id,
+        generation: exploration.generation,
+        revision: exploration.revision,
+        action: { type: 'report', report: preview },
+      }).catch(report);
+    },
+  });
+  applySelectionState = (theme, comparing) => {
+    selection.setTheme(theme);
+    selection.setSuspended(comparing);
+  };
   markerLayer = createMarkerLayer({
     onAction: (action) => {
       void handle(action).catch(report);
     },
-    getRect: (target) => selection.getRect(target),
+    getRect: (target) => variants?.rect(target.id) ?? selection.getRect(target),
   });
 
   function fallbackAnchor(targets: TargetSnapshot[]): MarkerAnchor | null {
@@ -326,6 +392,7 @@ export async function createRuntime(
     selectionPage = null;
     view.selected = [];
     view.draft = '';
+    view.variantsRequested = false;
     view.images = [];
     view.editingId = null;
     view.editorOpen = false;
@@ -341,7 +408,50 @@ export async function createRuntime(
     view.hasRecoveryCopy = !!next.recoveryCopies?.length;
     if (disposed) return;
     if (reconcilePage() || next.document.url !== pageUrl) return;
+    const previousEditingVariants = record?.document.annotations.find(
+      (annotation) => annotation.id === view.editingId,
+    )?.variants;
+    const editingVariants = next.document.annotations.find(
+      (annotation) => annotation.id === view.editingId,
+    )?.variants;
+    if (variantActive(previousEditingVariants) && editingVariants?.status === 'completed')
+      view.variantsRequested = false;
+    const previousExplorationId =
+      record &&
+      variantAnnotations(record.document).find(
+        (annotation) => annotation.id === view.variantAnnotationId,
+      )?.variants?.id;
+    const deletedExploration = next.document.variantCleanups?.some(
+      (entry) =>
+        entry.id === view.variantAnnotationId &&
+        record?.document.annotations.some((annotation) => annotation.id === entry.id),
+    );
     record = next;
+    view.variantPosition = next.variantPosition ? { ...next.variantPosition } : null;
+    const exploring =
+      variantAnnotations(next.document).find((annotation) => variantActive(annotation.variants)) ??
+      variantAnnotations(next.document).find(
+        (annotation) => annotation.id === view.variantAnnotationId && annotation.variants,
+      );
+    if (
+      view.variantAnnotationId !== (exploring?.id ?? '') ||
+      deletedExploration ||
+      previousExplorationId !== exploring?.variants?.id
+    )
+      view.variantMinimized = false;
+    view.variantAnnotationId = exploring?.id ?? '';
+    view.variantFeedback =
+      next.variantFeedback?.explorationId === exploring?.variants?.id
+        ? (next.variantFeedback?.text ?? '')
+        : '';
+    variants?.sync(localOnly ? undefined : exploring?.variants);
+    styleEditor?.holdForVariants(
+      exploring && variantActive(exploring.variants)
+        ? exploring.variants!.targetIds
+        : view.variantsRequested
+          ? view.selected.map((target) => target.id)
+          : [],
+    );
     styleEditor?.sync(next.document);
     view.document = next.document;
     view.storage = store.available ? 'ready' : 'unavailable';
@@ -361,6 +471,7 @@ export async function createRuntime(
       view.editorSessionId = '';
       view.editorPosition = null;
       view.editorOpen = false;
+      view.variantsRequested = false;
       view.marker = null;
       selection.clear();
       view.messageDescriptor = msg('annotationDeleted');
@@ -369,8 +480,15 @@ export async function createRuntime(
     render();
   }
   function snapshotDraft(): DraftRecord['draft'] {
+    const previous = record?.document.annotations.find(
+      (annotation) => annotation.id === view.editingId,
+    )?.variants;
     return {
       text: view.draft,
+      ...(view.variantsRequested ? { variantsRequested: true } : {}),
+      ...(view.variantsRequested && previous?.status === 'completed'
+        ? { variantRequestBase: previous.id }
+        : {}),
       images: structuredClone(view.images),
       editingId: view.editingId,
       targets: view.editorOpen
@@ -425,6 +543,7 @@ export async function createRuntime(
     const url = pageUrl;
     const currentConnection = connection;
     view.connection = 'connecting';
+    view.variantsSupported = false;
     render();
     const bound = await store.bindAuthority(
       key,
@@ -458,6 +577,16 @@ export async function createRuntime(
         if (token !== syncGeneration || disposed) return;
         const next = await store.applySync(key, url, response, images);
         if (token === syncGeneration && !disposed) accept(next);
+        if (response.variantConflicts?.length && token === syncGeneration && !disposed) {
+          view.variantConflict = true;
+          message(msg('variantsConflict'));
+        }
+      },
+      onVariantsSupport(supported) {
+        if (token === syncGeneration && !disposed) {
+          view.variantsSupported = supported;
+          render();
+        }
       },
       onState(state, text) {
         if (token === syncGeneration && !disposed) {
@@ -487,12 +616,21 @@ export async function createRuntime(
     record = next;
     editorViews = structuredClone(next.editorViews ?? {});
     view.draft = next.draft.text;
+    view.variantsRequested = next.draft.variantsRequested ?? false;
     view.images = structuredClone(next.draft.images ?? []);
     view.editingId =
       next.draft.editingId &&
       next.document.annotations.some((annotation) => annotation.id === next.draft.editingId)
         ? next.draft.editingId
         : null;
+    const editingVariants = next.document.annotations.find(
+      (annotation) => annotation.id === view.editingId,
+    )?.variants;
+    if (
+      editingVariants?.status === 'completed' &&
+      next.draft.variantRequestBase !== editingVariants.id
+    )
+      view.variantsRequested = false;
     const sessionId =
       view.editingId ??
       next.draft.editorSessionId ??
@@ -689,6 +827,136 @@ export async function createRuntime(
     render();
     await saveDraft();
   }
+  function validateVariantTargets(targets: TargetSnapshot[]) {
+    const elements = targets.map((target) => selection.getElement(target));
+    if (
+      !elements.length ||
+      elements.some(
+        (element) =>
+          !(element instanceof Element) ||
+          !element.getBoundingClientRect().width ||
+          !element.getBoundingClientRect().height,
+      ) ||
+      overlappingVariantTargets(
+        elements.filter((element): element is Element => element instanceof Element),
+      )
+    )
+      throw uiError('variantsInvalidTargets');
+  }
+  async function handleVariantAction(action: InspectorAction) {
+    if (!record) throw uiError('feedbackLoading');
+    if (action.type === 'variant-minimized') {
+      view.variantMinimized = action.value;
+      render();
+      return;
+    }
+    if (action.type === 'variant-position') {
+      if (!Number.isFinite(action.position.x) || !Number.isFinite(action.position.y)) return;
+      const token = pageGeneration;
+      const next = await store.update(pageKey, pageUrl, (current) => ({
+        ...current,
+        variantPosition: { ...action.position },
+      }));
+      if (token === pageGeneration && !disposed) accept(next);
+      return;
+    }
+    if (action.type === 'variants-toggle') {
+      if (
+        saving ||
+        variantActive(
+          record.document.annotations.find((item) => item.id === view.editingId)?.variants,
+        )
+      )
+        return;
+      if (action.value) {
+        if (localOnly || !view.variantsSupported || view.connection !== 'connected')
+          throw uiError('variantsNeedsConnection');
+        if (
+          variantAnnotations(record.document).some((annotation) =>
+            variantActive(annotation.variants),
+          )
+        )
+          throw uiError('variantsBusy');
+        validateVariantTargets(view.selected);
+      }
+      view.variantsRequested = action.value;
+      editorVersion++;
+      styleEditor?.holdForVariants(action.value ? view.selected.map((target) => target.id) : []);
+      render();
+      await saveDraft();
+      return;
+    }
+    if (action.type === 'variant-preview') {
+      variants?.select(action.value);
+      view.variantConflict = false;
+      render();
+      return;
+    }
+    if (action.type === 'variant-feedback') {
+      const id = record.document.annotations.find((item) => item.id === view.variantAnnotationId)
+        ?.variants?.id;
+      if (!id) return;
+      view.variantFeedback = action.value.slice(0, 10000);
+      const token = pageGeneration;
+      const next = await store.update(pageKey, pageUrl, (current) => ({
+        ...current,
+        variantFeedback: { explorationId: id, text: action.value.slice(0, 10000) },
+      }));
+      if (token === pageGeneration) accept(next);
+      return;
+    }
+    if (action.type === 'variant-decision') {
+      if (view.variantSaving || localOnly) return;
+      const annotation = record.document.annotations.find(
+        (item) => item.id === view.variantAnnotationId,
+      );
+      const exploration = annotation?.variants;
+      if (!annotation || !exploration) return;
+      const preview = variants!.state();
+      if (
+        action.decision === 'accept' &&
+        (preview.status !== 'ready' || preview.generation !== exploration.generation)
+      )
+        throw uiError('variantsBindingError');
+      const decision: VariantAction =
+        action.decision === 'accept'
+          ? { type: 'accept', variantId: preview.variantId, feedback: view.variantFeedback }
+          : { type: action.decision, feedback: view.variantFeedback };
+      view.variantSaving = true;
+      view.variantConflict = false;
+      const submittedFeedback = view.variantFeedback;
+      const token = pageGeneration;
+      const key = pageKey;
+      const url = pageUrl;
+      render();
+      try {
+        await mutate({
+          id: crypto.randomUUID(),
+          kind: 'variants',
+          annotationId: annotation.id,
+          explorationId: exploration.id,
+          generation: exploration.generation,
+          revision: exploration.revision,
+          action: decision,
+        });
+        const next = await store.update(key, url, (current) => {
+          if (
+            current.variantFeedback?.explorationId === exploration.id &&
+            current.variantFeedback.text === submittedFeedback
+          )
+            delete current.variantFeedback;
+          return current;
+        });
+        if (token !== pageGeneration || disposed) return;
+        accept(next);
+        message(msg('variantsDecisionSaved'));
+      } finally {
+        view.variantSaving = false;
+        render();
+      }
+      return;
+    }
+  }
   async function copy() {
     if (reconcilePage()) throw uiError('pageLoading');
     if (!record) throw uiError('feedbackLoading');
@@ -723,6 +991,17 @@ export async function createRuntime(
     }
     if (reconcilePage() || view.storage === 'loading') {
       message(msg('pageLoading'));
+      return;
+    }
+    if (
+      action.type === 'variants-toggle' ||
+      action.type === 'variant-preview' ||
+      action.type === 'variant-feedback' ||
+      action.type === 'variant-position' ||
+      action.type === 'variant-minimized' ||
+      action.type === 'variant-decision'
+    ) {
+      await handleVariantAction(action);
       return;
     }
     if (action.type === 'connect') {
@@ -791,6 +1070,7 @@ export async function createRuntime(
       return;
     }
     if (action.type === 'style-preview') {
+      if (view.variantStyleBlocked) throw uiError('variantsStylesPaused');
       if (view.editorOpen && !saving && !drawing) styleEditor?.preview(action.value, action.force);
       render();
       await saveDraft();
@@ -803,6 +1083,7 @@ export async function createRuntime(
       action.type === 'style-history'
     ) {
       if (!view.editorOpen || saving || drawing || !styleEditor) return;
+      if (view.variantStyleBlocked) throw uiError('variantsStylesPaused');
       if (
         action.type === 'style-change' &&
         !styleEditor.edit(action.property, action.value, action.linked)
@@ -825,6 +1106,11 @@ export async function createRuntime(
       return;
     }
     if (action.type === 'navigate-target') {
+      if (
+        view.variantsRequested ||
+        record.document.annotations.find((item) => item.id === view.editingId)?.variants
+      )
+        throw uiError('variantsInvalidTargets');
       await navigateTarget(action);
       return;
     }
@@ -1000,6 +1286,32 @@ export async function createRuntime(
     }
     if (action.type === 'save') {
       if (saving) return;
+      const startingVariants =
+        view.variantsRequested &&
+        !variantActive(
+          record.document.annotations.find((annotation) => annotation.id === view.editingId)
+            ?.variants,
+        );
+      if (startingVariants) {
+        const original = record.document.annotations.find(
+          (annotation) => annotation.id === view.editingId,
+        );
+        validateVariantTargets(
+          mergeStyleTargets(
+            view.targetsAdjusted ? view.selected : (original?.targets ?? view.selected),
+          ),
+        );
+      }
+      if (
+        startingVariants &&
+        (localOnly || !view.variantsSupported || view.connection !== 'connected')
+      )
+        throw uiError('variantsNeedsConnection');
+      if (
+        startingVariants &&
+        variantAnnotations(record.document).some((annotation) => variantActive(annotation.variants))
+      )
+        throw uiError('variantsBusy');
       saving = true;
       view.saving = true;
       render();
@@ -1023,6 +1335,9 @@ export async function createRuntime(
           id: existing?.id || view.editorSessionId || crypto.randomUUID(),
           comment:
             draft.trim() ||
+            (view.variantsRequested
+              ? formatMessage(view.locale, msg('variantsEmptyComment'))
+              : '') ||
             (styleEditor && (styleEditor.state().count || styleEditor.state().dirty)
               ? formatMessage(view.locale, msg('styleOnlyFeedback'))
               : draft),
@@ -1049,6 +1364,7 @@ export async function createRuntime(
                 : {}),
           status: existing?.status || 'pending',
           replies: existing?.replies || [],
+          ...(startingVariants && existing?.variants ? { variants: existing.variants } : {}),
           ...(view.images.length ? { images: structuredClone(view.images) } : {}),
         });
         await mutate(
@@ -1057,6 +1373,7 @@ export async function createRuntime(
             kind: 'upsert',
             annotation,
             styleLinks: styleEditor?.links() ?? {},
+            ...(startingVariants ? { variantRequest: crypto.randomUUID() } : {}),
           },
           submittedDraft,
         );
@@ -1076,6 +1393,7 @@ export async function createRuntime(
     const annotation = record.document.annotations.find((item) => item.id === action.id);
     if (!annotation) throw uiError('missingAnnotation');
     if (action.type === 'edit') {
+      if (annotation.id === view.variantAnnotationId) view.variantConflict = false;
       if (view.editingId === annotation.id) {
         view.editorOpen = true;
         render();
@@ -1095,6 +1413,7 @@ export async function createRuntime(
       delete view.messageDescriptor;
       view.editingId = annotation.id;
       view.draft = annotation.comment;
+      view.variantsRequested = variantActive(annotation.variants);
       view.images = structuredClone(annotation.images ?? []);
       view.marker = annotation.marker ?? fallbackAnchor(annotation.targets);
       view.editorOpen = true;
@@ -1125,6 +1444,7 @@ export async function createRuntime(
     preferences.destroy();
     disposed = true;
     styleEditor?.destroy();
+    variants?.destroy();
     drawing?.abort();
     for (const url of imageUrls.values()) URL.revokeObjectURL(url);
     imageUrls.clear();
@@ -1145,6 +1465,13 @@ export async function createRuntime(
   function reconcilePage() {
     if (location.href === pageUrl || disposed) return false;
     styleEditor?.reset();
+    variants?.sync();
+    view.variantAnnotationId = '';
+    view.variantsRequested = false;
+    view.variantFeedback = '';
+    view.variantPosition = null;
+    view.variantMinimized = false;
+    view.variantConflict = false;
     editorViews = {};
     view.editorSessionId = '';
     view.editorPosition = null;

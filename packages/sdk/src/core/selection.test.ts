@@ -77,6 +77,117 @@ afterEach(() => {
 });
 
 describe('selection in a real browser', () => {
+  it('temporarily yields host input and shortcuts without losing selection or committing a Shift batch', async () => {
+    const { selection, fixture, onSelect, onCancel, onPickingChange } = await setup();
+    fixture.innerHTML = '<button>First</button><button>Second</button>';
+    const [first, second] = [...fixture.querySelectorAll('button')];
+    const nativeClick = vi.fn();
+    second!.addEventListener('click', nativeClick);
+    selection.setPicking(true);
+    click(first!, { shiftKey: true });
+    const before = selection.getTargets();
+    selection.setSuspended(true);
+    await settle();
+    expect(
+      document
+        .querySelector('[data-ainotation-ui="selection"]')!
+        .shadowRoot!.querySelectorAll('.rect'),
+    ).toHaveLength(0);
+    expect(key('keyup', 'Shift')).toBe(true);
+    expect(click(second!, { shiftKey: true })).toBe(true);
+    expect(key('keydown', 'Escape')).toBe(true);
+    expect(nativeClick).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(selection.getTargets()).toEqual(before);
+    expect(onPickingChange.mock.calls).toEqual([[true]]);
+    selection.setSuspended(false);
+    await settle();
+    expect(
+      document
+        .querySelector('[data-ainotation-ui="selection"]')!
+        .shadowRoot!.querySelectorAll('.rect'),
+    ).toHaveLength(1);
+    expect(click(second!)).toBe(false);
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(nativeClick).toHaveBeenCalledOnce();
+  });
+
+  it('does not re-enable picking that was closed or explicitly disabled during suspension', async () => {
+    const { selection, fixture, onSelect } = await setup();
+    fixture.innerHTML = '<button>Native</button>';
+    const button = fixture.querySelector('button')!;
+    selection.setPicking(true);
+    selection.setSuspended(true);
+    selection.setPicking(false);
+    selection.setSuspended(false);
+    expect(click(button)).toBe(true);
+    selection.setSuspended(true);
+    selection.setVisible(false);
+    selection.setPicking(true);
+    selection.setSuspended(false);
+    selection.setVisible(true);
+    expect(click(button)).toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+    selection.setPicking(true);
+    expect(click(button)).toBe(false);
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it('keeps manual Alt passthrough independent from automatic selection suspension', async () => {
+    const { selection, fixture, onSelect, onPassthroughChange } = await setup();
+    fixture.innerHTML = '<button>Native</button>';
+    const button = fixture.querySelector('button')!;
+    selection.setPicking(true);
+    selection.setSuspended(true);
+    expect(onPassthroughChange).not.toHaveBeenCalled();
+    key('keydown', 'Alt', document, { altKey: true });
+    key('keyup', 'Alt');
+    expect(onPassthroughChange.mock.calls).toEqual([[true], [false]]);
+    expect(click(button)).toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+    selection.setSuspended(false);
+    expect(click(button, { altKey: true })).toBe(true);
+    key('keyup', 'Alt');
+    expect(click(button)).toBe(false);
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
+  it('cancels intercepted presses and lets native gestures finish across suspension changes', async () => {
+    const { selection, fixture, onSelect } = await setup();
+    fixture.innerHTML = '<button>Native</button>';
+    const button = fixture.querySelector('button')!;
+    const nativeClick = vi.fn();
+    button.addEventListener('click', nativeClick);
+    const pointer = (type: string) =>
+      button.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+          isPrimary: true,
+          pointerId: 1,
+          button: 0,
+        }),
+      );
+    selection.setPicking(true);
+    expect(pointer('pointerdown')).toBe(false);
+    selection.setSuspended(true);
+    expect(pointer('pointerup')).toBe(false);
+    expect(click(button, { detail: 1 })).toBe(false);
+    expect(nativeClick).not.toHaveBeenCalled();
+    expect(pointer('pointerdown')).toBe(true);
+    selection.setSuspended(false);
+    expect(pointer('pointerup')).toBe(true);
+    expect(click(button, { detail: 1 })).toBe(true);
+    expect(nativeClick).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
+    pointer('pointerdown');
+    click(button, { detail: 1 });
+    expect(onSelect).toHaveBeenCalledOnce();
+    expect(nativeClick).toHaveBeenCalledOnce();
+  });
+
   it('applies custom exclusions to descendants across shadow boundaries, including restored identities', async () => {
     const { fixture, createSelection } = await setup();
     const wrapper = document.createElement('div');

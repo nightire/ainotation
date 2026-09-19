@@ -2,6 +2,17 @@
 
 Run `vp run storybook` from the repository root, then open http://127.0.0.1:6006/.
 
+## UI Variants
+
+`Annotations / UI Variants` includes Light, Dark and Chinese controller examples.
+These are component demos with a simulated agent state, using the public
+`defineVariants` host protocol for actual single-branch candidate rendering.
+Previous/Next navigation shows one design and its page number, including Original.
+The controller starts at the bottom center and supports blank-area dragging.
+Real MCP roundtrips, HMR, regeneration and cleanup are covered by the Playground
+tests, including React and Vue hosts. The production SDK requires a compatible MCP
+connection; the existing local-only style-editor demo does not expose this entry.
+
 ## Style editor prototype
 
 For the integrated SDK, open **Annotations → Style Editor → Live**. This story

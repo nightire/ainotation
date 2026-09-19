@@ -75,6 +75,11 @@ export function createProjectConnection(options: {
   const annotationPath = (sessionId: string, annotationId: string) =>
     `${sessionPath(sessionId)}/annotations/${z.uuid().parse(annotationId)}`;
   const backend: McpFeedbackBackend = {
+    async variants(sessionId, operation) {
+      return FeedbackExportSchema.parse(
+        await request(`${sessionPath(sessionId)}/variants`, 'POST', operation),
+      );
+    },
     async getImage(sessionId, imageId) {
       const path = `${sessionPath(sessionId)}/images/${z.uuid().parse(imageId)}`;
       const { connection, client } = await lease();

@@ -58,6 +58,7 @@ export function createSyncClient(options: {
   apply: (response: SyncResponse, images: Record<string, Blob>) => Promise<void>;
   onState: (state: 'connecting' | 'connected' | 'error', message: UiMessage) => void;
   onSync: (syncing: boolean) => void;
+  onVariantsSupport?: (supported: boolean) => void;
   onRecovery?: (response: SyncResponse) => Promise<void>;
   recovery?: SyncRequest['recovery'];
   once?: boolean;
@@ -84,6 +85,12 @@ export function createSyncClient(options: {
     problem = msg('styleSyncUnsupported');
     throw uiError('styleSyncUnsupported');
   };
+  const unsupportedVariants = () => {
+    paused = true;
+    problem = msg('variantsUnsupported');
+    options.onVariantsSupport?.(false);
+    throw uiError('variantsUnsupported');
+  };
   const sync = (): Promise<void> => {
     wanted = true;
     if (running) return running;
@@ -97,7 +104,16 @@ export function createSyncClient(options: {
           const connection = await resolveConnection();
           if (stopped) return;
           const needsStyles = requiresSharedStyles(record);
-          if (needsStyles) {
+          const needsVariants =
+            !!record.document.variantCleanups?.length ||
+            record.document.annotations.some((annotation) => annotation.variants) ||
+            record.operations.some(
+              (operation) =>
+                operation.kind === 'variants' ||
+                (operation.kind === 'upsert' &&
+                  (operation.variantRequest || operation.annotation.variants)),
+            );
+          if (needsStyles || needsVariants) {
             // Old services strip unknown fields and consume operation IDs. Probe
             // without writing before sending a style-bearing document or operation.
             const health = await fetch(`${connection.endpoint}/health`, {
@@ -107,10 +123,19 @@ export function createSyncClient(options: {
               cache: 'no-store',
               signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
             });
-            if (health.status === 404) unsupportedStyles();
+            if (health.status === 404) {
+              if (needsVariants) unsupportedVariants();
+              else unsupportedStyles();
+            }
             if (!health.ok) throw new Error(`MCP capability check failed (${health.status}).`);
             const data = await health.json();
-            if (!StyleSyncCapabilitiesSchema.safeParse(data?.capabilities).success)
+            if (needsVariants && data?.capabilities?.uiVariants !== 1) unsupportedVariants();
+            if (
+              record.document.variantCleanups?.length &&
+              data?.capabilities?.uiVariantsCleanup !== 1
+            )
+              unsupportedVariants();
+            if (needsStyles && !StyleSyncCapabilitiesSchema.safeParse(data?.capabilities).success)
               unsupportedStyles();
             if (stopped) return;
           }
@@ -139,6 +164,11 @@ export function createSyncClient(options: {
               await response.json().catch(() => undefined),
             );
             const code = diagnostic.success ? diagnostic.data.code : undefined;
+            if (code === 'variants-busy') {
+              paused = true;
+              problem = msg('variantsBusy');
+              throw uiError('variantsBusy');
+            }
             if (code === 'recovery-stale' && recovery) {
               recovery = undefined;
               wanted = true;
@@ -154,6 +184,10 @@ export function createSyncClient(options: {
             );
           }
           const data = SyncResponseSchema.parse(await response.json());
+          if (needsVariants && data.uiVariants !== 1) unsupportedVariants();
+          if (record.document.variantCleanups?.length && data.uiVariantsCleanup !== 1)
+            unsupportedVariants();
+          options.onVariantsSupport?.(data.uiVariants === 1);
           if (needsStyles && !StyleSyncCapabilitiesSchema.safeParse(data).success)
             unsupportedStyles();
           if (data.document.id !== options.sessionId || data.document.url !== record.document.url)

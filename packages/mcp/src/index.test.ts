@@ -38,6 +38,7 @@ it('serves annotation and image tools and the public schema over MCP without an 
   const tools = (await client.listTools()).tools;
   expect(tools.map((tool) => tool.name)).toEqual([
     'ainotation_get_schema',
+    'ainotation_get_variants_guide',
     'ainotation_list_sessions',
     'ainotation_get_feedback',
     'ainotation_get_image',
@@ -45,10 +46,15 @@ it('serves annotation and image tools and the public schema over MCP without an 
     'ainotation_get_annotation',
     'ainotation_update_annotation',
     'ainotation_delete_annotation',
+    'ainotation_get_variants',
+    'ainotation_publish_variants',
+    'ainotation_complete_variants',
   ]);
   for (const tool of tools) {
     const readOnly = [
       'ainotation_get_schema',
+      'ainotation_get_variants_guide',
+      'ainotation_get_variants',
       'ainotation_list_sessions',
       'ainotation_get_feedback',
       'ainotation_get_image',
@@ -61,7 +67,8 @@ it('serves annotation and image tools and the public schema over MCP without an 
   }
   const schema = await call('ainotation_get_schema', {});
   expect(schema).toEqual(feedbackExportJsonSchema());
-  expect(JSON.stringify(schema)).not.toMatch(/"(?:status|replies)"/);
+  expect(schema).not.toHaveProperty('properties.annotations.items.properties.status');
+  expect(schema).not.toHaveProperty('properties.annotations.items.properties.replies');
 });
 
 it('projects all reads and mutation responses while retaining internal conversations', async () => {

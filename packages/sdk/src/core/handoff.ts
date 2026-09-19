@@ -16,7 +16,11 @@ export async function copyProjectFeedback(
 ): Promise<string> {
   const output = records.then((records) => {
     if (!active()) throw new Error('Inspector was unmounted before feedback could be copied.');
-    const documents = records.filter((document) => document.annotations.length > 0);
+    const documents = records.filter(
+      (document) =>
+        document.annotations.length > 0 ||
+        document.variantCleanups?.some((entry) => entry.variants.status !== 'completed'),
+    );
     const emptyPage = records.find((document) => document.url === current.url) ?? {
       ...current,
       annotations: [],

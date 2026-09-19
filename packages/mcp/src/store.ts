@@ -7,6 +7,13 @@ import {
   applyFeedbackOperation,
   normalizeSharedStyles,
   STYLE_SYNC_CAPABILITIES,
+  VARIANTS_CAPABILITIES,
+  VariantOperationSchema,
+  transitionVariants,
+  variantActive,
+  variantAnnotations,
+  canStartVariantExploration,
+  type VariantOperation,
   FeedbackDocumentSchema,
   SyncRequestSchema,
   SyncResponseSchema,
@@ -30,6 +37,10 @@ const SessionSchema = z
     origin: z.string(),
     seen: z.array(z.uuid()).max(MAX_OPERATION_IDS),
     tombstones: z.array(z.uuid()).max(MAX_OPERATION_IDS),
+    variantWrites: z
+      .record(z.uuid(), z.string().regex(/^[a-f0-9]{64}$/))
+      .refine((writes) => Object.keys(writes).length <= MAX_OPERATION_IDS)
+      .optional(),
   })
   .strict();
 const FileSchema = z
@@ -97,7 +108,27 @@ function validateAnnotationPage(url: string, pageUrl: string): void {
 
 function validateSession(session: Session): void {
   SessionSchema.parse(session);
+  if (
+    variantAnnotations(session.document).filter((annotation) => variantActive(annotation.variants))
+      .length > 1
+  )
+    throw new StoreError(409, 'Only one UI Variants exploration can be active on this page.');
+  for (const annotation of variantAnnotations(session.document)) {
+    validateAnnotationPage(session.document.url, annotation.page.url);
+    if (
+      annotation.variants &&
+      (annotation.variants.targetIds.length !== annotation.targets.length ||
+        annotation.variants.targetIds.some(
+          (id) => !annotation.targets.some((target) => target.id === id),
+        ))
+    )
+      throw new StoreError(
+        400,
+        'Variant slots must reference the annotation’s original target set.',
+      );
+  }
   const ids = session.document.annotations.map((annotation) => annotation.id);
+  const cleanupIds = (session.document.variantCleanups ?? []).map((entry) => entry.id);
   const images = new Map<string, FeedbackImage>();
   for (const image of session.document.annotations.flatMap(
     (annotation) => annotation.images ?? [],
@@ -110,6 +141,8 @@ function validateSession(session: Session): void {
   if (
     documentOrigin(session.document) !== session.origin ||
     new Set(ids).size !== ids.length ||
+    new Set(cleanupIds).size !== cleanupIds.length ||
+    cleanupIds.some((id) => ids.includes(id)) ||
     new Set(session.seen).size !== session.seen.length ||
     new Set(session.tombstones).size !== session.tombstones.length ||
     ids.some((id) => session.tombstones.includes(id)) ||
@@ -342,6 +375,13 @@ export class FeedbackStore {
   private async commit(session: Session, preserveImages = false): Promise<void> {
     session.document = normalizeSharedStyles(session.document);
     validateSession(session);
+    if (
+      variantAnnotations(session.document).some((annotation) =>
+        variantActive(annotation.variants),
+      ) &&
+      this.otherVariants(session.document)
+    )
+      throw new StoreError(409, 'Another session already owns UI Variants for this page.');
     await this.checkpoint();
     const previous = this.sessions.get(session.document.id);
     const previousImages = new Map(
@@ -395,6 +435,55 @@ export class FeedbackStore {
     }
   }
 
+  private otherVariants(document: FeedbackDocument) {
+    return [...this.sessions.values()].some(
+      (session) =>
+        session.document.id !== document.id &&
+        session.document.url === document.url &&
+        variantAnnotations(session.document).some((annotation) =>
+          variantActive(annotation.variants),
+        ),
+    );
+  }
+
+  async variants(sessionId: string, input: VariantOperation): Promise<FeedbackDocument> {
+    const operation = VariantOperationSchema.parse(input);
+    if (!['publish', 'complete'].includes(operation.action.type))
+      throw new StoreError(403, 'Only the browser can record user decisions and preview reports.');
+    return this.mutate(async () => {
+      const document = this.get(sessionId);
+      const session = this.sessions.get(sessionId)!;
+      const fingerprint = createHash('sha256').update(JSON.stringify(operation)).digest('hex');
+      if (session.seen.includes(operation.id)) {
+        if (session.variantWrites?.[operation.id] !== fingerprint)
+          throw new StoreError(409, 'Operation ID was already used for another mutation.');
+        return document;
+      }
+      if (session.seen.length >= MAX_OPERATION_IDS)
+        throw new StoreError(409, 'Operation capacity reached');
+      const annotation = variantAnnotations(document).find(
+        (item) => item.id === operation.annotationId,
+      );
+      const next = annotation?.variants && transitionVariants(annotation.variants, operation);
+      if (!next || !annotation)
+        throw new StoreError(
+          409,
+          'Exploration changed. Read the latest generation, revision and decision before retrying.',
+        );
+      annotation.variants = next;
+      annotation.updatedAt = new Date(
+        Math.max(Date.now(), Date.parse(annotation.updatedAt) + 1),
+      ).toISOString();
+      await this.commit({
+        ...session,
+        document,
+        seen: [...session.seen, operation.id],
+        variantWrites: { ...session.variantWrites, [operation.id]: fingerprint },
+      });
+      return document;
+    });
+  }
+
   async sync(sessionId: string, input: SyncRequest, requestOrigin: string): Promise<SyncResponse> {
     z.uuid().parse(sessionId);
     const request = SyncRequestSchema.parse(input);
@@ -440,6 +529,7 @@ export class FeedbackStore {
           document: previous.document,
           acknowledged: [],
           ...STYLE_SYNC_CAPABILITIES,
+          ...VARIANTS_CAPABILITIES,
           storageEpoch: this.storageEpoch,
           recovery: { revision },
         });
@@ -451,24 +541,106 @@ export class FeedbackStore {
       const session: Session = previous
         ? structuredClone(previous)
         : {
-            document: request.document,
+            document: structuredClone(request.document),
             origin: requestOrigin,
             seen: [],
             tombstones: [],
           };
       if (resolving && request.recovery!.source === 'browser') {
+        // Browser recovery must not silently discard an outstanding cleanup task.
+        const pending = session.document.variantCleanups ?? [];
         session.document = request.document;
+        if (pending.length) {
+          session.document = structuredClone(request.document);
+          session.document.variantCleanups = [
+            ...(session.document.variantCleanups ?? []).filter(
+              (entry) => !pending.some((old) => old.id === entry.id),
+            ),
+            ...pending,
+          ];
+          session.document.annotations = session.document.annotations.filter(
+            (entry) => !pending.some((old) => old.id === entry.id),
+          );
+        }
         session.tombstones = session.tombstones.filter(
           (id) => !request.document.annotations.some((annotation) => annotation.id === id),
         );
       }
+      const variantConflicts: string[] = [];
+      if (!previous && this.otherVariants(session.document)) {
+        const restoring =
+          !!session.document.variantCleanups?.some((entry) => variantActive(entry.variants)) ||
+          session.document.annotations.some(
+            (annotation) =>
+              variantActive(annotation.variants) &&
+              !request.operations.some(
+                (operation) =>
+                  operation.kind === 'upsert' &&
+                  operation.variantRequest === annotation.variants?.id,
+              ),
+          );
+        if (restoring)
+          throw new StoreError(
+            409,
+            'Another session owns this page exploration. Local exploration data must be retained.',
+            'variants-busy',
+          );
+        for (const annotation of session.document.annotations)
+          if (variantActive(annotation.variants)) delete annotation.variants;
+      }
       validateSession(session);
       const seen = new Set(session.seen);
-      const tombstones = new Set(session.tombstones);
+      const tombstones = new Set([
+        ...session.tombstones,
+        ...(session.document.variantCleanups ?? []).map((entry) => entry.id),
+      ]);
       for (const operation of resolving ? [] : request.operations) {
         if (seen.has(operation.id)) continue;
         if (seen.size >= MAX_OPERATION_IDS) throw new StoreError(409, 'Operation capacity reached');
         const id = operation.kind === 'upsert' ? operation.annotation.id : operation.annotationId;
+        // A stale edit/start request must be acknowledged before any conflict
+        // fallback can apply its ordinary annotation payload.
+        if (operation.kind === 'upsert' && tombstones.has(id)) {
+          seen.add(operation.id);
+          continue;
+        }
+        if (operation.kind === 'variants') {
+          if (['publish', 'complete'].includes(operation.action.type))
+            throw new StoreError(403, 'Agent connection required to publish or complete variants.');
+          const exploration = session.document.annotations.find(
+            (annotation) => annotation.id === id,
+          )?.variants;
+          if (!exploration || !transitionVariants(exploration, operation)) {
+            if (operation.action.type !== 'report') variantConflicts.push(operation.id);
+            seen.add(operation.id);
+            continue;
+          }
+        }
+        const previousVariants = session.document.annotations.find(
+          (annotation) => annotation.id === id,
+        )?.variants;
+        if (
+          operation.kind === 'upsert' &&
+          operation.variantRequest &&
+          previousVariants?.id !== operation.variantRequest &&
+          (!canStartVariantExploration(
+            previousVariants,
+            operation.variantRequest,
+            operation.annotation.variants,
+          ) ||
+            this.otherVariants(session.document) ||
+            variantAnnotations(session.document).some(
+              (annotation) => annotation.id !== id && variantActive(annotation.variants),
+            ))
+        ) {
+          variantConflicts.push(operation.id);
+          const ordinary = { ...operation, annotation: { ...operation.annotation } };
+          delete ordinary.variantRequest;
+          delete ordinary.annotation.variants;
+          session.document = applyFeedbackOperation(session.document, ordinary);
+          seen.add(operation.id);
+          continue;
+        }
         if (operation.kind === 'delete') {
           if (!tombstones.has(id) && tombstones.size >= MAX_OPERATION_IDS)
             throw new StoreError(409, 'Tombstone capacity reached');
@@ -505,6 +677,8 @@ export class FeedbackStore {
         document: session.document,
         acknowledged: request.operations.map((operation) => operation.id),
         ...STYLE_SYNC_CAPABILITIES,
+        ...VARIANTS_CAPABILITIES,
+        ...(variantConflicts.length ? { variantConflicts } : {}),
         storageEpoch: this.storageEpoch,
         missingImages: await this.missingImages(session.document),
       });
@@ -573,6 +747,12 @@ export class FeedbackStore {
       if (patch.comment !== undefined) annotation.comment = patch.comment;
       if (patch.page !== undefined) annotation.page = patch.page;
       if (patch.targets !== undefined) annotation.targets = patch.targets;
+      if (
+        annotation.variants &&
+        patch.targets !== undefined &&
+        !isDeepStrictEqual(patch.targets, before.targets)
+      )
+        throw new StoreError(409, 'Targets are immutable during a UI Variants exploration.');
       if (isDeepStrictEqual(annotation, before)) return document;
       annotation.updatedAt = new Date(
         Math.max(Date.now(), Date.parse(before.updatedAt) + 1),
@@ -594,8 +774,11 @@ export class FeedbackStore {
       if (index === -1) throw new StoreError(404, 'Annotation not found in session');
       if (session.tombstones.length >= MAX_OPERATION_IDS)
         throw new StoreError(409, 'Tombstone capacity reached');
-      document.annotations.splice(index, 1);
-      const shared = normalizeSharedStyles(document);
+      const shared = applyFeedbackOperation(document, {
+        id: randomUUID(),
+        kind: 'delete',
+        annotationId,
+      });
       await this.commit({
         ...session,
         document: shared,

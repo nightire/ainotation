@@ -77,6 +77,105 @@ Omitting `mcp` retains manual connection and saved-credential restoration; an
 `mcp: { endpoint, token }` object configures a manual connection. The Vite plugin
 continues to use its automatic development bridge.
 
+## UI Variants
+
+With a compatible MCP connection, enable **UI Variants** in the Feedback panel.
+Saving requests design exploration instead of an immediate replacement. The agent
+reads the versioned guide, edits the host code and registers candidates. Compare
+them in the page controller, then record **I want this**, **Regenerate**
+or **Cancel**. Tell your agent when to continue; no tool call waits
+and no client session is automatically resumed.
+
+The compact controller shows the current design and a page indicator, with
+Previous/Next buttons cycling through all designs including Original. It starts
+at the bottom center (above the toolbar on narrow screens). Drag non-interactive
+blank areas to move it, or focus the panel and use arrow keys. Its last position
+is stored locally per project/full URL, restored on reload and clamped to the
+visible viewport. Input, button and touch-scrolling behavior remains native;
+position preferences are not included in feedback or MCP data.
+
+The top-right minimize button collapses the controller to its title row. Use
+Expand to restore the same candidate, feedback and open sections. The title row
+remains draggable; minimizing does not end exploration or resume element picking.
+Cancel is the last footer action, styled as destructive. A confirmation dialog
+offers Keep comparing or Cancel; Escape returns to comparison. Cancellation is
+recorded only after confirmation, and an exploration update dismisses a stale dialog.
+
+After the agent reports cleanup complete, the annotation's UI Variants switch
+returns to off and can be enabled again. Saving with it enabled starts a fresh
+exploration on the same annotation, with a new exploration ID and round 1.
+Ordinary saves retain the completed record. Old completion-related draft flags
+are cleared on reload; an explicitly requested new exploration remains a draft
+until saved.
+
+Deleting an unfinished exploration's annotation (or clearing all annotations)
+retains a separate `document.variantCleanups` record. The preview returns to
+Original and the controller reminds the user to ask an agent to restore source
+and remove generated candidates and temporary integration. The annotation and its
+marker stay deleted; cleanup continues to reserve the page until the agent reports
+completion. These records survive refresh and synchronize only with services
+advertising `uiVariantsCleanup: 1`; older services leave local pending data intact.
+
+While a published generation is being compared, element picking, selection outlines
+and page markers are temporarily suspended. Interact with the page directly without
+holding Alt; the controller and View annotation panel remain usable. Confirming,
+regenerating or cancelling restores the existing picking mode. Collapsing the
+inspector stays respected, and the next published generation suspends picking again.
+
+There is one active exploration per project and full URL, including across browser
+sessions. Original is separate from the default three candidates (1–6 supported).
+Multiple targets switch as a complete design. Target roots must be visible and
+disjoint; each can have different internal structure in each candidate. Related
+style overrides pause while their drafts remain intact. Existing snapshots remain
+unchanged. Local-only (`mcp: false`) instances do not expose this feature.
+
+Use the host framework for conditional rendering. The development API is:
+
+```ts
+import { defineVariants } from '@ainotation/sdk/variants';
+
+const group = defineVariants({
+  explorationId, // from the annotation's variants object
+  targetIds, // captured target UUIDs are slot IDs
+  generations: [{ generation: 1, variants: ['compact', 'expressive', 'soft'] }],
+});
+
+const snapshot = group.getSnapshot(); // stable { generation, variantId }
+const unsubscribe = group.subscribe(() => rerender());
+// After the host commits its DOM, bind the snapshot used for THAT render:
+const unbind = group.bind(targetIds[0], renderedRoot, snapshot);
+// On root unmount: unbind(). On module/HMR disposal:
+unsubscribe();
+unbind();
+group.dispose();
+```
+
+The disconnected and server-rendering snapshot is `{ generation: 0, variantId:
+'original' }`. React can subscribe with `useSyncExternalStore` and bind refs in a
+`useLayoutEffect` with cleanup. Vue can use `shallowRef`, `watchPostEffect` and
+`onUnmounted`; pass the snapshot used to render, not a later store value.
+The real framework integration fixtures in `apps/playground/tests/variant-framework-fixtures.ts`
+exercise both patterns. No React/Vue dependency is added to the SDK.
+
+Keep data and business handlers outside design branches where practical. Switching
+may reset local component state. Scope candidate CSS to the selected instance.
+Do not duplicate live component trees and merely hide inactive copies, add wrapper
+elements that change layout, or globally alter a reusable component unintentionally.
+Retain old generation implementations when staging a new generation. A manifest
+being registered is distinct from the browser reporting all roots ready.
+
+For Vite, prefer `virtual:ainotation/variants` and add
+`/// <reference types="@ainotation/vite/variants" />` to your environment declarations.
+Its production module always selects original and contains no SDK runtime. Gate
+candidate modules/CSS behind development-only imports and check production output.
+Other integrations must gate the SDK host API themselves.
+
+Accept/cancel records a decision; the agent must still apply/restore the source and
+remove the temporary integration, then report completion. Cancellation remains an
+active handoff until cleanup is reported. Start a new annotation for a new
+exploration after completion. Deleting/clearing annotations ends previews but does
+not edit host source; remove leftover development scaffolding separately.
+
 ## License
 
 MIT licensed, free for personal and commercial use, including modification,

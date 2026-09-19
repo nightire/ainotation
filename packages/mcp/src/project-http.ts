@@ -5,6 +5,8 @@ import {
   feedbackExportJsonSchema,
   SyncRequestSchema,
   STYLE_SYNC_CAPABILITIES,
+  VARIANTS_CAPABILITIES,
+  VariantOperationSchema,
 } from '@ainotation/schema';
 import { z } from 'zod';
 import { AnnotationPatchSchema, CreateAnnotationSchema, StoreError } from './store';
@@ -170,7 +172,7 @@ export async function startProjectHttpServer(options: {
           version: 1,
           instanceId,
           project: { projectId: scope.project.projectId, name: scope.project.name },
-          capabilities: STYLE_SYNC_CAPABILITIES,
+          capabilities: { ...STYLE_SYNC_CAPABILITIES, ...VARIANTS_CAPABILITIES },
         });
         return;
       }
@@ -198,6 +200,17 @@ export async function startProjectHttpServer(options: {
         return;
       }
       if (scope.grant.kind !== 'agent') throw new StoreError(403, 'Agent connection required');
+      const variants = /^\/sessions\/([^/]+)\/variants$/.exec(path);
+      if (variants && request.method === 'POST') {
+        const operation = VariantOperationSchema.parse(await readJson(request));
+        scope = await scopeFor(request);
+        if (scope.grant.kind !== 'agent') throw new StoreError(403, 'Agent connection required');
+        json(
+          200,
+          feedbackExport(await scope.store.variants(z.uuid().parse(variants[1]), operation)),
+        );
+        return;
+      }
       if (request.method === 'GET' && path === '/schema') {
         json(200, feedbackExportJsonSchema());
         return;

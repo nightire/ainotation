@@ -1,7 +1,8 @@
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite-plus';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
+import { expect } from 'vite-plus/test';
 
 export function createPlaygroundServer(specifier: string) {
   const name = basename(fileURLToPath(specifier), '.test.ts');
@@ -32,4 +33,15 @@ export function configurePage(page: Page, errors: string[]) {
   page.setDefaultTimeout(5000);
   page.setDefaultNavigationTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
+}
+
+export async function previewVariant(controller: Locator, id: string) {
+  const current = controller.locator('[data-current-variant]');
+  for (let step = 0; step < 7; step++) {
+    const previous = await current.getAttribute('data-current-variant');
+    if (previous === id) return;
+    await controller.getByRole('button', { name: 'Next design', exact: true }).click();
+    await expect.poll(() => current.getAttribute('data-current-variant')).not.toBe(previous);
+  }
+  throw new Error(`Variant ${id} was not found in the navigation.`);
 }

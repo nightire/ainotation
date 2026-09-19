@@ -1,7 +1,9 @@
 import type { Messages } from './en';
 import { styleJa } from './styles';
+import { variantsJa } from './variants';
 
 export const ja = {
+  ...variantsJa,
   ...styleJa,
   settings: '設定',
   language: '言語',

@@ -1,7 +1,9 @@
 import type { Messages } from './en';
 import { styleZhHans } from './styles';
+import { variantsZhHans } from './variants';
 
 export const zhHans = {
+  ...variantsZhHans,
   ...styleZhHans,
   settings: '设置',
   language: '语言',

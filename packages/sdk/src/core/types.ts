@@ -7,6 +7,7 @@ import type {
   StyleProperty,
 } from '@ainotation/schema';
 import type { StyleEditorState, StyleLinkage } from './style-editor';
+import { emptyVariantPreview, type VariantPreviewState } from './variants-controller';
 import type { Locale, UiMessage } from '../i18n';
 import { en } from '../i18n/en';
 
@@ -89,9 +90,26 @@ export interface InspectorViewState {
   styleTargetId: string;
   styleTargets: TargetSnapshot[];
   styleEditor: StyleEditorState;
+  variantsRequested: boolean;
+  variantsSupported: boolean;
+  variantsComparing: boolean;
+  variantAnnotationId: string;
+  variantPreview: VariantPreviewState;
+  variantFeedback: string;
+  variantPosition: { x: number; y: number } | null;
+  variantMinimized: boolean;
+  variantSaving: boolean;
+  variantStyleBlocked: boolean;
+  variantConflict: boolean;
 }
 
 export type InspectorAction =
+  | { type: 'variants-toggle'; value: boolean }
+  | { type: 'variant-preview'; value: string }
+  | { type: 'variant-feedback'; value: string }
+  | { type: 'variant-position'; position: { x: number; y: number } }
+  | { type: 'variant-minimized'; value: boolean }
+  | { type: 'variant-decision'; decision: 'accept' | 'regenerate' | 'cancel' }
   | {
       type:
         | 'save'
@@ -170,6 +188,17 @@ export function emptyViewState(): InspectorViewState {
     editorPosition: null,
     styleTargetId: '',
     styleTargets: [],
+    variantsRequested: false,
+    variantsSupported: false,
+    variantsComparing: false,
+    variantAnnotationId: '',
+    variantPreview: emptyVariantPreview(),
+    variantFeedback: '',
+    variantPosition: null,
+    variantMinimized: false,
+    variantSaving: false,
+    variantStyleBlocked: false,
+    variantConflict: false,
     styleEditor: {
       preview: false,
       values: {},

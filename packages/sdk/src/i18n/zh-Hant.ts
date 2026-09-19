@@ -1,7 +1,9 @@
 import type { Messages } from './en';
 import { styleZhHant } from './styles';
+import { variantsZhHant } from './variants';
 
 export const zhHant = {
+  ...variantsZhHant,
   ...styleZhHant,
   settings: '設定',
   language: '語言',

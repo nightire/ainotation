@@ -6,6 +6,24 @@ import { createSelection } from './selection';
 const cleanup: (() => void)[] = [];
 afterEach(() => cleanup.splice(0).forEach((dispose) => dispose()));
 
+it('holds variant target overrides without losing drafts or changing preview preferences', () => {
+  const { element, target, editor } = setup();
+  const original = element.style.paddingTop;
+  editor.edit('padding-top', '24px');
+  expect(element.style.paddingTop).toBe('24px');
+  const drafts = editor.drafts();
+  const preference = editor.preference();
+  editor.holdForVariants([target.id]);
+  expect(element.style.paddingTop).toBe(original);
+  expect(editor.drafts()).toEqual(drafts);
+  expect(editor.preference()).toEqual(preference);
+  editor.global(false);
+  editor.global(true);
+  expect(element.style.paddingTop).toBe(original);
+  editor.holdForVariants([]);
+  expect(element.style.paddingTop).toBe('24px');
+});
+
 it.each(['padding', 'margin'] as const)(
   'edits and restores %s by all sides or axis as one undo operation',
   (family) => {

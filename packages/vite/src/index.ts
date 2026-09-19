@@ -28,6 +28,7 @@ export interface AinotationPluginOptions {
 }
 const VIRTUAL_ID = 'virtual:ainotation/client';
 const RESOLVED_ID = `\0${VIRTUAL_ID}`;
+const VARIANTS_ID = 'virtual:ainotation/variants';
 
 async function canonicalPath(path: string): Promise<string> {
   try {
@@ -47,12 +48,14 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
   let base = '/';
   let bridgePath = '/__ainotation';
   let closing: Promise<void> | undefined;
+  let development = false;
   let unwatch: (() => void) | undefined;
   const lifetime = new AbortController();
   const clientPath = fileURLToPath(
     new URL(import.meta.url.endsWith('.ts') ? './client.ts' : './client.mjs', import.meta.url),
   );
   const sdkPath = fileURLToPath(import.meta.resolve('@ainotation/sdk'));
+  const variantsPath = fileURLToPath(import.meta.resolve('@ainotation/sdk/variants'));
   const close = (): Promise<void> => {
     closing ??= (async () => {
       lifetime.abort();
@@ -88,8 +91,9 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
   }
   return {
     name: 'ainotation',
-    apply: 'serve',
-    async config(config) {
+    async config(config, environment) {
+      development = environment.command === 'serve';
+      if (!development) return;
       const directory = resolve(options.serviceDirectory ?? defaultServiceDirectory());
       const canonical = await canonicalPath(directory);
       const runtimeDirectory = serviceOwnerPaths(canonical).root;
@@ -228,8 +232,13 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
     },
     resolveId(id) {
       if (id === VIRTUAL_ID) return RESOLVED_ID;
+      if (id === VARIANTS_ID) return `\0${VARIANTS_ID}`;
     },
     load(id) {
+      if (id === `\0${VARIANTS_ID}`)
+        return development
+          ? `export { defineVariants } from ${JSON.stringify(normalizePath(variantsPath))};`
+          : `const original = Object.freeze({ generation: 0, variantId: 'original' }); export function defineVariants() { return { getSnapshot: () => original, subscribe: () => () => {}, bind: () => () => {}, dispose() {} }; }`;
       if (id !== RESOLVED_ID || !project) return;
       const config = {
         projectId: project.config.projectId,
@@ -239,6 +248,7 @@ export function ainotation(options: AinotationPluginOptions = {}): Plugin {
       return `import { mountDevelopmentInspector } from ${JSON.stringify(normalizePath(clientPath))};\nconst dispose = mountDevelopmentInspector(${JSON.stringify(config)});\nif (import.meta.hot) import.meta.hot.dispose(dispose);`;
     },
     transformIndexHtml() {
+      if (!development) return [];
       return [
         {
           tag: 'script',

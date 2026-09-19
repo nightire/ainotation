@@ -95,7 +95,9 @@ import { createAinotation } from '@ainotation/sdk';
 import { createFeedbackDocument } from '@ainotation/schema';
 import { createMcpServer } from '@ainotation/mcp';
 import { ainotation } from '@ainotation/vite';
+import { defineVariants } from '@ainotation/sdk/variants';
 assert.equal(createAinotation().mounted, false);
+assert.deepEqual(defineVariants({ explorationId: 'ssr', targetIds: [], generations: [] }).getSnapshot(), { generation: 0, variantId: 'original' });
 assert.equal(createFeedbackDocument('http://localhost/').annotations.length, 0);
 assert.equal(ainotation({ name: 'package-check' }).name, 'ainotation');
 const server = createMcpServer();
@@ -110,8 +112,13 @@ import { createAinotation, type AinotationOptions } from '@ainotation/sdk';
 import { FeedbackExportSchema } from '@ainotation/schema';
 import { createMcpServer } from '@ainotation/mcp';
 import { ainotation } from '@ainotation/vite';
+import '@ainotation/vite/variants';
+import { defineVariants } from 'virtual:ainotation/variants';
+import type { VariantGroupOptions } from '@ainotation/sdk/variants';
 const options: AinotationOptions = { projectId: 'package-check' };
 void [createAinotation(options), FeedbackExportSchema, createMcpServer, ainotation({ name: 'package-check' })];
+const variants: VariantGroupOptions = { explorationId: 'type-check', targetIds: [], generations: [] };
+void defineVariants(variants).getSnapshot().variantId;
 `,
   );
   await writeFile(

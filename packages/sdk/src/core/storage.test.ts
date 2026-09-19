@@ -1,4 +1,9 @@
-import type { Annotation, FeedbackOperation, SyncResponse } from '@ainotation/schema';
+import {
+  createVariantExploration,
+  type Annotation,
+  type FeedbackOperation,
+  type SyncResponse,
+} from '@ainotation/schema';
 import { openDB } from 'idb';
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test';
 
@@ -7,6 +12,83 @@ import { canvasBlob, describeImage } from './images';
 
 const stores: DraftStore[] = [];
 const keys: string[] = [];
+
+it('keeps an exploration cleanup task when clearing all annotations, including after reload', async () => {
+  const store = await openStore(),
+    key = pageKey();
+  const active = annotation('Generate designs'),
+    ordinary = annotation('Ordinary note');
+  active.variants = createVariantExploration(
+    crypto.randomUUID(),
+    active.targets.map((target) => target.id),
+  );
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    document: { ...record.document, annotations: [active, ordinary] },
+  }));
+  const cleared = await store.clearAnnotations(key, location.href, [active.id, ordinary.id]);
+  expect(cleared.document.annotations).toEqual([]);
+  expect(cleared.document.variantCleanups).toHaveLength(1);
+  expect(cleared.document.variantCleanups![0]).toMatchObject({
+    id: active.id,
+    variants: { status: 'cancelled', decision: { kind: 'cancel' } },
+  });
+  const reopened = await openStore();
+  expect((await reopened.load(key, location.href)).document).toEqual(cleared.document);
+  const again = await store.clearAnnotations(key, location.href, [active.id]);
+  expect(again.document.variantCleanups).toEqual(cleared.document.variantCleanups);
+  const stale = await store.mutate(key, location.href, {
+    id: crypto.randomUUID(),
+    kind: 'upsert',
+    annotation: active,
+  });
+  expect(stale.document.annotations).toEqual([]);
+  expect(stale.document.variantCleanups).toEqual(cleared.document.variantCleanups);
+});
+
+it('persists explicit restart intent separately from legacy exploration flags', async () => {
+  const store = await openStore(),
+    key = pageKey();
+  const previous = crypto.randomUUID();
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    draft: { ...record.draft, variantsRequested: true, variantRequestBase: previous },
+  }));
+  const reopened = await openStore();
+  expect((await reopened.read(key, location.href)).draft).toMatchObject({
+    variantsRequested: true,
+    variantRequestBase: previous,
+  });
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    draft: { ...record.draft, variantRequestBase: 'invalid' },
+  }));
+  expect((await reopened.read(key, location.href)).draft.variantRequestBase).toBeUndefined();
+});
+
+it('persists the local variants panel position per page and ignores invalid coordinates', async () => {
+  const store = await openStore();
+  const key = pageKey();
+  const note = annotation('Keep this feedback');
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    document: { ...record.document, annotations: [note] },
+    variantPosition: { x: 120.5, y: 240 },
+  }));
+  const reopened = await openStore();
+  expect((await reopened.read(key, location.href)).variantPosition).toEqual({ x: 120.5, y: 240 });
+  expect((await reopened.read(pageKey(), location.href)).variantPosition).toBeUndefined();
+  expect(JSON.stringify((await reopened.read(key, location.href)).document)).not.toContain(
+    'variantPosition',
+  );
+  await store.update(key, location.href, (record) => ({
+    ...record,
+    variantPosition: { x: Number.NaN, y: 0 },
+  }));
+  const next = await reopened.read(key, location.href);
+  expect(next.variantPosition).toBeUndefined();
+  expect(next.document.annotations[0]!.comment).toBe('Keep this feedback');
+});
 
 it('persists bounded navigation slots while ignoring corrupt editor metadata without losing feedback', async () => {
   const store = await openStore(),
